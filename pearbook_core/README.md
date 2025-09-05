@@ -190,6 +190,7 @@ pearbook_core/
 - **Periodic**: Syncs all groups every 5 seconds in the background.
 - **On-Demand**: Syncs before balance queries for up-to-date data.
 - **Merging**: Uses CRDT Merge functions to resolve conflicts and achieve eventual consistency.
+- **Unique Tags**: Generates UUIDs for each CRDT operation to ensure proper conflict resolution.
 
 ### Design Principles
 - **Decentralized**: No central server; data replicated via DHT.

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/khelechy/pearbook/crdt"
 	"github.com/khelechy/pearbook/dht"
 	"github.com/khelechy/pearbook/models"
@@ -112,7 +113,7 @@ func (n *Node) CreateGroup(groupID, name string, creator string) error {
 		Balances: make(map[string]map[string]*crdt.PNCounter),
 	}
 
-	group.Members.Add(creator, "tag1") // unique tag
+	group.Members.Add(creator, uuid.New().String()) // unique tag
 
 	n.mu.Lock()
 	n.Groups[groupID] = group
@@ -144,7 +145,7 @@ func (n *Node) JoinGroup(groupID, userID string) error {
 		}
 	}
 	if !found {
-		group.Members.Add(userID, "tag2") // unique tag
+		group.Members.Add(userID, uuid.New().String()) // unique tag
 		group.Balances[userID] = make(map[string]*crdt.PNCounter)
 	}
 
@@ -176,7 +177,7 @@ func (n *Node) AddExpense(groupID string, expense models.Expense) error {
 		}
 	}
 
-	group.Expenses.Put(expense.ID, expense, "tag-exp")
+	group.Expenses.Put(expense.ID, expense, uuid.New().String())
 
 	// Update balances
 	for user, owed := range expense.Splits {
