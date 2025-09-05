@@ -185,6 +185,12 @@ pearbook_core/
 - **Simulated DHT**: In-memory storage for PoC; replace with libp2p for real P2P.
 - **HTTP API**: Simple REST interface for clients.
 
+### Syncing Mechanism
+- **Joining**: Fetches group data when a user joins.
+- **Periodic**: Syncs all groups every 5 seconds in the background.
+- **On-Demand**: Syncs before balance queries for up-to-date data.
+- **Merging**: Uses CRDT Merge functions to resolve conflicts and achieve eventual consistency.
+
 ### Design Principles
 - **Decentralized**: No central server; data replicated via DHT.
 - **Eventual Consistency**: CRDTs handle concurrent updates.

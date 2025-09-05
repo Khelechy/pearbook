@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/khelechy/pearbook/crdt"
 	"github.com/khelechy/pearbook/models"
 )
 
@@ -74,4 +75,48 @@ func TestSyncGroup(t *testing.T) {
 	if node.Groups["testgroup"] == nil {
 		t.Fatal("Group not synced to local cache")
 	}
+}
+
+func TestORSetMerge(t *testing.T) {
+	set1 := crdt.NewORSet()
+	set1.Add("alice", "tag1")
+	set2 := crdt.NewORSet()
+	set2.Add("bob", "tag2")
+	set1.Merge(set2)
+	elements := set1.Elements()
+	if len(elements) != 2 || !contains(elements, "alice") || !contains(elements, "bob") {
+		t.Fatalf("Merge failed, elements: %v", elements)
+	}
+}
+
+func TestORMapMerge(t *testing.T) {
+	m := crdt.NewORMap()
+	m.Put("exp1", models.Expense{ID: "exp1"}, "tag1")
+	m2 := crdt.NewORMap()
+	m2.Put("exp2", models.Expense{ID: "exp2"}, "tag2")
+	m.Merge(m2)
+	keys := m.Keys()
+	if len(keys) != 2 || !contains(keys, "exp1") || !contains(keys, "exp2") {
+		t.Fatalf("Merge failed, keys: %v", keys)
+	}
+}
+
+func TestPNCounterMerge(t *testing.T) {
+	c1 := crdt.NewPNCounter()
+	c1.Increment("node1", 10)
+	c2 := crdt.NewPNCounter()
+	c2.Increment("node2", 5)
+	c1.Merge(c2)
+	if c1.Value() != 15 {
+		t.Fatalf("Merge failed, value: %d", c1.Value())
+	}
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }

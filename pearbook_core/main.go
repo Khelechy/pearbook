@@ -201,11 +201,33 @@ func (n *Node) SyncGroup(groupID string) error {
 		return fmt.Errorf("group not found")
 	}
 
-	var group models.Group
-	json.Unmarshal([]byte(val), &group)
+	var remoteGroup models.Group
+	json.Unmarshal([]byte(val), &remoteGroup)
 
 	n.mu.Lock()
-	n.Groups[groupID] = &group
+	localGroup, exists := n.Groups[groupID]
+	if !exists {
+		// If no local group, just set it
+		n.Groups[groupID] = &remoteGroup
+	} else {
+		// Merge CRDTs
+		localGroup.Members.Merge(remoteGroup.Members)
+		localGroup.Expenses.Merge(remoteGroup.Expenses)
+		// For balances, merge each PN-Counter
+		for user, remoteBalances := range remoteGroup.Balances {
+			if localGroup.Balances[user] == nil {
+				localGroup.Balances[user] = make(map[string]*crdt.PNCounter)
+			}
+			for payer, remoteCounter := range remoteBalances {
+				if localGroup.Balances[user][payer] == nil {
+					localGroup.Balances[user][payer] = crdt.NewPNCounter()
+				}
+				localGroup.Balances[user][payer].Merge(remoteCounter)
+			}
+		}
+		// Update non-CRDT fields
+		localGroup.Name = remoteGroup.Name
+	}
 	n.mu.Unlock()
 
 	return nil
