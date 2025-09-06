@@ -125,31 +125,6 @@ func main() {
 		}
 	}()
 
-	// Demo usage (uncomment to use)
-	// err := srv.CreateGroup("group1", "Trip to Paris", "alice")
-	// if err != nil {
-	//      log.Fatal(err)
-	// }
-
-	// err = srv.JoinGroup("group1", "bob")
-	// if err != nil {
-	//      log.Fatal(err)
-	// }
-
-	// expense := models.Expense{
-	//      ID:           "exp1",
-	//      Amount:       100.0,
-	//      Description:  "Dinner",
-	//      Payer:        "alice",
-	//      Participants: []string{"alice", "bob"},
-	// }
-	// err = srv.AddExpense("group1", expense)
-	// if err != nil {
-	//      log.Fatal(err)
-	// }
-
-	// balances := srv.GetBalances("group1", "bob")
-	// fmt.Printf("Bob's balances: %v\n", balances)
 
 	// Wait for SIGINT or SIGTERM
 	stop := make(chan os.Signal, 1)

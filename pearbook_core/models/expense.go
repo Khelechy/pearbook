@@ -2,10 +2,10 @@ package models
 
 // Expense represents an expense
 type Expense struct {
-	ID           string
-	Amount       float64
-	Description  string
-	Payer        string
-	Participants []string
-	Splits       map[string]float64 // user -> amount owed
+	ID           string             `json:"id"`
+	Amount       float64            `json:"amount"`
+	Description  string             `json:"description"`
+	Payer        string             `json:"payer"`
+	Participants []string           `json:"participants"`
+	Splits       map[string]float64 `json:"splits"` // user -> amount owed
 }
