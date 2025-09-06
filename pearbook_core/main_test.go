@@ -5,10 +5,11 @@ import (
 
 	"github.com/khelechy/pearbook/crdt"
 	"github.com/khelechy/pearbook/models"
+	"github.com/khelechy/pearbook/node"
 )
 
 func TestCreateGroup(t *testing.T) {
-	node := NewNode()
+	node := node.NewNode()
 	err := node.CreateGroup("testgroup", "Test Group", "alice")
 	if err != nil {
 		t.Fatalf("Failed to create group: %v", err)
@@ -23,7 +24,7 @@ func TestCreateGroup(t *testing.T) {
 }
 
 func TestJoinGroup(t *testing.T) {
-	node := NewNode()
+	node := node.NewNode()
 	node.CreateGroup("testgroup", "Test Group", "alice")
 	err := node.JoinGroup("testgroup", "bob")
 	if err != nil {
@@ -40,7 +41,7 @@ func TestJoinGroup(t *testing.T) {
 }
 
 func TestAddExpense(t *testing.T) {
-	node := NewNode()
+	node := node.NewNode()
 	node.CreateGroup("testgroup", "Test Group", "alice")
 	node.JoinGroup("testgroup", "bob")
 	expense := models.Expense{
@@ -66,7 +67,7 @@ func TestAddExpense(t *testing.T) {
 }
 
 func TestSyncGroup(t *testing.T) {
-	node := NewNode()
+	node := node.NewNode()
 	node.CreateGroup("testgroup", "Test Group", "alice")
 	err := node.SyncGroup("testgroup")
 	if err != nil {

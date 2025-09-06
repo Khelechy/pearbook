@@ -50,7 +50,6 @@ PearBook allows users to create groups, join them, add expenses, and track balan
 
 ## Running the Application
 
-1. **Start the Server**:
    ```bash
    go run main.go
    ```
@@ -67,6 +66,8 @@ PearBook allows users to create groups, join them, add expenses, and track balan
 
 3. **Stop the Server**:
    Press `Ctrl+C` in the terminal.
+
+  The server now supports graceful shutdown: when you press `Ctrl+C` (SIGINT) or send a SIGTERM signal, it will finish handling any in-progress requests before exiting cleanly.
 
 ## API Usage
 
