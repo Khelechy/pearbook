@@ -50,6 +50,8 @@ This project is designed as a proof-of-concept for academic research on:
 - **CAP Theorem**: Demonstrating eventual consistency in a distributed system.
 - **Peer-to-Peer Systems**: Decentralized data management without central authorities.
 
+[Reference research paper here](https://doi.org/10.64388/IREV9I2-1710338-8995)
+
 ## Contributing
 
 Contributions are welcome! Please:
