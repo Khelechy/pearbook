@@ -204,7 +204,7 @@ This implementation serves as a case study for:
 - **CRDTs in Practice**: Demonstrating OR-Set for sets and PN-Counter for counters.
 - **DHT Scalability**: Simulating Kademlia for distributed storage.
 
-For your paper, reference the code for real-world CRDT applications in expense tracking.
+[Reference research paper here](https://doi.org/10.64388/IREV9I2-1710338-8995)
 
 ## Contributing
 1. Fork the repository.
