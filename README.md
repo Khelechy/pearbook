@@ -1,6 +1,6 @@
 ﻿# PearBook
 
-A distributed expense tracker proof-of-concept demonstrating Conflict-Free Replicated Data Types (CRDTs) in a peer-to-peer network using Kademlia DHT, built for research on eventual consistency and the CAP theorem.
+An offline first distributed expense tracker proof-of-concept demonstrating Conflict-Free Replicated Data Types (CRDTs) in a peer-to-peer network using Kademlia DHT, built for research on eventual consistency and the CAP theorem.
 
 ## Overview
 
