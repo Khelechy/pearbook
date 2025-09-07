@@ -15,8 +15,22 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
+type AllowAnyValidator struct{}
+
+func (v *AllowAnyValidator) Validate(key string, value []byte) error {
+    return nil // Accept everything
+}
+
+func (v *AllowAnyValidator) Select(key string, values [][]byte) (int, error) {
+    if len(values) == 0 {
+        return -1, fmt.Errorf("no values")
+    }
+    return 0, nil
+}
+
 func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT, host.Host, error) {
 	var bootstrapNode bool
+
 	if len(bootstrapAddressStr) == 0 {
 		bootstrapNode = true
 	}
@@ -39,11 +53,11 @@ func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT,
 	} else {
 		bootstrapAddr, err := ma.NewMultiaddr(bootstrapAddressStr)
 		if err != nil {
-			return nil, nil, fmt.Errorf("Invalid bootstrap address: %w", err)
+			return nil, nil, fmt.Errorf("invalid bootstrap address: %w", err)
 		}
 		cBootstrapPeer, err := peer.AddrInfoFromP2pAddr(bootstrapAddr)
 		if err != nil {
-			return nil, nil, fmt.Errorf("Failed to parse bootstrap peer: %w", err)
+			return nil, nil, fmt.Errorf("failed to parse bootstrap peer: %w", err)
 		}
 		bootstrapPeer = cBootstrapPeer
 
@@ -57,8 +71,6 @@ func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT,
 		h = cHost
 	}
 
-	defer h.Close()
-
 	// Create datastore
 	dstore := dsync.MutexWrap(ds.NewMapDatastore())
 
@@ -71,6 +83,8 @@ func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT,
 			dht.Datastore(dstore),
 			dht.Mode(dht.ModeServer),
 			dht.BootstrapPeers(peer.AddrInfo{}),
+			dht.ProtocolPrefix("/myapp"),
+			dht.Validator(&AllowAnyValidator{}),
 		)
 		if err != nil {
 			return nil, nil, err
@@ -78,7 +92,7 @@ func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT,
 		if err := kadDHT.Bootstrap(ctx); err != nil {
 			log.Printf("Bootstrap error: %v", err)
 		}
-		
+
 		// Print bootstrap node information
 		fmt.Println("🚀 Bootstrap Node Started")
 		fmt.Println("========================")
@@ -113,6 +127,8 @@ func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT,
 		kadDHT, err = dht.New(ctx, h,
 			dht.Datastore(dstore),
 			dht.Mode(dht.ModeServer),
+			dht.ProtocolPrefix("/myapp"),
+			dht.Validator(&AllowAnyValidator{}),
 			dht.BootstrapPeers(*bootstrapPeer),
 		)
 		if err != nil {

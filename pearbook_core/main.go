@@ -108,7 +108,7 @@ func main() {
     defer cancel()
 
 	// Setup libp2p DHT and host
-    kadDHT, host, err := dht.SetupLibp2p(ctx, "")
+    kadDHT, host, err := dht.SetupLibp2p(ctx, "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWGoute9W7S5Y2Fv7aFxbEYU9e7NqJumtMsBHVZvyzGwjh")
     if err != nil {
         log.Fatalf("Failed to setup libp2p: %v", err)
     }
@@ -129,7 +129,7 @@ func main() {
 	// Start periodic sync
 	n.StartPeriodicSync(ctx)
 
-	srvAddr := ":8080"
+	srvAddr := ":6000"
 	httpServer := &http.Server{
 		Addr:    srvAddr,
 		Handler: mux,

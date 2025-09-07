@@ -60,8 +60,8 @@ func (n *Node) CreateGroup(ctx context.Context, groupID, name string, creator st
 
 	data, _ := json.Marshal(group)
 	key := "group:" + groupID
-	n.KDHT.PutValue(ctx, key, data)
-	return nil
+	err := n.KDHT.PutValue(ctx, key, data)
+	return err
 }
 
 // JoinGroup joins an existing group

@@ -4,7 +4,7 @@ An offline first distributed expense tracker proof-of-concept demonstrating Conf
 
 ## Overview
 
-PearBook is a decentralized application that allows users to track shared expenses without relying on central servers. It uses custom CRDT implementations (OR-Set, PN-Counter, OR-Map) over a simulated Kademlia DHT to ensure eventual consistency across distributed nodes.
+PearBook is a decentralized application that allows users to track shared expenses without relying on central servers. It uses custom CRDT implementations (OR-Set, PN-Counter, OR-Map) over an actual Kademlia DHT using libp2p to ensure eventual consistency across distributed nodes.
 
 This project serves as a research prototype for exploring:
 - CRDTs in distributed systems
@@ -15,7 +15,7 @@ This project serves as a research prototype for exploring:
 
 ## Project Structure
 
-- **pearbook_core/**: Go-based backend implementing the core logic, CRDTs, simulated Kademlia DHT, and HTTP API. See [README](pearbook_core/README.md) for setup and usage.
+- **pearbook_core/**: Go-based backend implementing the core logic, CRDTs, actual Kademlia DHT using libp2p, and HTTP API. See [README](pearbook_core/README.md) for setup and usage.
 - **mobile/** (planned): Mobile app codebase for iOS/Android clients.
 - **docs/** (planned): Research papers, CRDT explanations, and architecture docs.
 
@@ -23,7 +23,7 @@ This project serves as a research prototype for exploring:
 
 - **Decentralized Groups**: Create and join expense groups without a central server.
 - **CRDT-Based Syncing**: Automatic conflict resolution using OR-Set (members), OR-Map (expenses), and PN-Counter (balances).
-- **Kademlia DHT Networking**: Simulated DHT for data storage and retrieval in a P2P network.
+- **Kademlia DHT Networking**: Actual DHT using libp2p for data storage and retrieval in a real P2P network.
 - **HTTP API**: RESTful endpoints for group management, expense addition, and balance queries.
 - **Eventual Consistency**: Merges data from multiple nodes to resolve conflicts.
 
@@ -32,7 +32,7 @@ This project serves as a research prototype for exploring:
 ### Core Components
 - **Node**: Manages groups, DHT, and CRDT operations.
 - **CRDTs**: OR-Set for members, OR-Map for expenses, PN-Counter for balancesensure eventual consistency without conflicts.
-- **Simulated Kademlia DHT**: In-memory storage for PoC; replace with libp2p for real P2P.
+- **Actual Kademlia DHT using libp2p**: Real P2P network for decentralized data storage and retrieval.
 - **HTTP API**: Simple REST interface for clients.
 
 ### Syncing Mechanism

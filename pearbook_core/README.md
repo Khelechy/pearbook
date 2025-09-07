@@ -1,6 +1,6 @@
 # PearBook: Distributed Expense Tracker
 
-A proof-of-concept implementation of a peer-to-peer expense sharing application using Conflict-free Replicated Data Types (CRDTs) over a simulated Kademlia Distributed Hash Table (DHT). This project demonstrates eventual consistency in distributed systems, aligning with the CAP theorem's trade-offs for high availability and partition tolerance without a central server.
+A proof-of-concept implementation of a peer-to-peer expense sharing application using Conflict-free Replicated Data Types (CRDTs) over an actual Kademlia Distributed Hash Table (DHT) using libp2p. This project demonstrates eventual consistency in distributed systems, aligning with the CAP theorem's trade-offs for high availability and partition tolerance without a central server.
 
 ## Project Overview
 
@@ -9,9 +9,9 @@ PearBook allows users to create groups, join them, add expenses, and track balan
 ### Key Technologies
 - **Language**: Go 1.19+
 - **CRDTs**: Custom implementations of OR-Set (for group members), OR-Map (for expenses), and PN-Counter (for balances)
-- **DHT**: Simulated Kademlia DHT (in-memory for PoC; can be replaced with libp2p)
+- **DHT**: Actual Kademlia DHT using libp2p
 - **Networking**: HTTP API for client interactions
-- **Storage**: In-memory (simulated DHT)
+- **Storage**: Distributed via libp2p DHT
 
 ## Features
 - **Decentralized Groups**: Create and join groups without a central authority.
@@ -164,7 +164,7 @@ This executes tests for group creation, joining, expense addition, and balance r
 
 ### Integration Testing
 - Simulate multiple nodes by running multiple instances (modify ports).
-- Use the simulated DHT to test data replication (though in-memory, it's local).
+- Use the actual libp2p DHT to test data replication across peers.
 
 ## Architecture
 
@@ -175,7 +175,7 @@ pearbook_core/
 ├── main_test.go     # Unit tests
 ├── models/          # Data structures (User, Group, Expense)
 ├── crdt/            # CRDT implementations (OR-Set, PN-Counter)
-├── dht/             # Simulated DHT
+├── dht/             # Actual Kademlia DHT using libp2p
 ├── go.mod           # Go module file
 └── README.md        # This file
 ```
@@ -183,7 +183,7 @@ pearbook_core/
 ### Core Components
 - **Node**: Manages groups, DHT, and CRDT operations.
 - **CRDTs**: OR-Set for members, OR-Map for expenses, PN-Counter for balances—ensure eventual consistency without conflicts.
-- **Simulated DHT**: In-memory storage for PoC; replace with libp2p for real P2P.
+- **Actual Kademlia DHT using libp2p**: Real P2P network for decentralized data storage and retrieval.
 - **HTTP API**: Simple REST interface for clients.
 
 ### Syncing Mechanism
@@ -203,7 +203,7 @@ pearbook_core/
 This implementation serves as a case study for:
 - **CAP Theorem**: Prioritizing Availability and Partition Tolerance over strict Consistency.
 - **CRDTs in Practice**: Demonstrating OR-Set for sets and PN-Counter for counters.
-- **DHT Scalability**: Simulating Kademlia for distributed storage.
+- **DHT Scalability**: Using actual Kademlia DHT with libp2p for distributed storage.
 
 [Reference research paper here](https://doi.org/10.64388/IREV9I2-1710338-8995)
 
@@ -221,4 +221,4 @@ For issues or questions, open a GitHub issue or contact the maintainer.
 
 ---
 
-**Note**: This is a proof-of-concept. For production, integrate real DHT (e.g., libp2p), add authentication, and handle larger datasets.
+**Note**: This is a proof-of-concept. For production, add authentication, handle larger datasets, and optimize the libp2p DHT configuration.
