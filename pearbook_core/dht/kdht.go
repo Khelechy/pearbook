@@ -12,6 +12,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	ma "github.com/multiformats/go-multiaddr"
 )
 
@@ -28,7 +29,7 @@ func (v *AllowAnyValidator) Select(key string, values [][]byte) (int, error) {
     return 0, nil
 }
 
-func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT, host.Host, error) {
+func SetupLibp2p(ctx context.Context, bootstrapAddressStr, bootstrapSetupPort, appProtocol string) (*dht.IpfsDHT, host.Host, error) {
 	var bootstrapNode bool
 
 	if len(bootstrapAddressStr) == 0 {
@@ -42,8 +43,8 @@ func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT,
 	if bootstrapNode {
 		bHost, err := libp2p.New(
 			libp2p.ListenAddrStrings(
-				"/ip4/0.0.0.0/tcp/4001",
-				"/ip4/0.0.0.0/udp/4001/quic",
+				fmt.Sprintf("/ip4/0.0.0.0/tcp/%s", bootstrapSetupPort),
+				fmt.Sprintf("/ip4/0.0.0.0/udp/%s/quic", bootstrapSetupPort),
 			),
 		)
 		if err != nil {
@@ -74,6 +75,8 @@ func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT,
 	// Create datastore
 	dstore := dsync.MutexWrap(ds.NewMapDatastore())
 
+	protocolPrefix := protocol.ID(appProtocol)
+
 	// Create DHT in Server mode and set default peer if its a bootstrap node
 	var kadDHT *dht.IpfsDHT
 	if bootstrapNode {
@@ -83,7 +86,7 @@ func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT,
 			dht.Datastore(dstore),
 			dht.Mode(dht.ModeServer),
 			dht.BootstrapPeers(peer.AddrInfo{}),
-			dht.ProtocolPrefix("/myapp"),
+			dht.ProtocolPrefix(protocolPrefix),
 			dht.Validator(&AllowAnyValidator{}),
 		)
 		if err != nil {
@@ -127,7 +130,7 @@ func SetupLibp2p(ctx context.Context, bootstrapAddressStr string) (*dht.IpfsDHT,
 		kadDHT, err = dht.New(ctx, h,
 			dht.Datastore(dstore),
 			dht.Mode(dht.ModeServer),
-			dht.ProtocolPrefix("/myapp"),
+			dht.ProtocolPrefix(protocolPrefix),
 			dht.Validator(&AllowAnyValidator{}),
 			dht.BootstrapPeers(*bootstrapPeer),
 		)

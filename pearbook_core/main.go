@@ -16,6 +16,7 @@ import (
 	"github.com/khelechy/pearbook/node"
 
 	"github.com/common-nighthawk/go-figure"
+    "github.com/joho/godotenv"
 )
 
 // Local wrapper type for HTTP handlers
@@ -104,11 +105,18 @@ func (s *server) handleGetBalances(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	godotenv.Load()
+
+	protocol := os.Getenv("DHT_PROTOCOL")
+	bootstrapPeer := os.Getenv("DHT_BOOTSTRAP_PEER")
+	bootstrapSetupPort := os.Getenv("DHT_BOOTSTRAP_SETUP_PORT")
+	apiPort := os.Getenv("API_PORT")
+
 	ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
 	// Setup libp2p DHT and host
-    kadDHT, host, err := dht.SetupLibp2p(ctx, "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWGoute9W7S5Y2Fv7aFxbEYU9e7NqJumtMsBHVZvyzGwjh")
+    kadDHT, host, err := dht.SetupLibp2p(ctx, bootstrapPeer, bootstrapSetupPort, protocol)
     if err != nil {
         log.Fatalf("Failed to setup libp2p: %v", err)
     }
@@ -129,7 +137,7 @@ func main() {
 	// Start periodic sync
 	n.StartPeriodicSync(ctx)
 
-	srvAddr := ":6000"
+	srvAddr := fmt.Sprintf(":%s", apiPort)
 	httpServer := &http.Server{
 		Addr:    srvAddr,
 		Handler: mux,
