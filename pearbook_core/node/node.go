@@ -18,16 +18,18 @@ import (
 
 // Node represents a peer node
 type Node struct {
-	DHT    *dht.SimulatedDHT
-	KDHT   *kdht.IpfsDHT
-	Groups map[string]*models.Group // local cache
-	mu     sync.RWMutex
+	ID      string
+	DHT     *dht.SimulatedDHT
+	KDHT    *kdht.IpfsDHT
+	Groups  map[string]*models.Group // local cache
+	mu      sync.RWMutex
 }
 
 // NewNode creates a new node
 func NewNode() *Node {
 
 	return &Node{
+		ID:     uuid.New().String(),
 		DHT:    dht.NewSimulatedDHT(),
 		Groups: make(map[string]*models.Group),
 	}
@@ -36,6 +38,7 @@ func NewNode() *Node {
 func NewNodeWithKDHT(kadDHT *kdht.IpfsDHT) *Node {
 
 	return &Node{
+		ID:     uuid.New().String(),
 		DHT:    dht.NewSimulatedDHT(),
 		KDHT:   kadDHT,
 		Groups: make(map[string]*models.Group),
@@ -129,7 +132,7 @@ func (n *Node) AddExpense(ctx context.Context, groupID string, expense models.Ex
 		if group.Balances[user][expense.Payer] == nil {
 			group.Balances[user][expense.Payer] = crdt.NewPNCounter()
 		}
-		group.Balances[user][expense.Payer].Increment("node", int64(owed*100))
+		group.Balances[user][expense.Payer].Increment(n.ID, int64(owed*100))
 	}
 
 	data, _ := json.Marshal(group)
