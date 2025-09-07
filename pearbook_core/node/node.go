@@ -1,38 +1,49 @@
 package node
 
 import (
-	"sync"
+	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/khelechy/pearbook/models"
 	"github.com/khelechy/pearbook/crdt"
 	"github.com/khelechy/pearbook/dht"
+	"github.com/khelechy/pearbook/models"
+
+	kdht "github.com/libp2p/go-libp2p-kad-dht"
 )
 
 // Node represents a peer node
 type Node struct {
 	DHT    *dht.SimulatedDHT
+	KDHT   *kdht.IpfsDHT
 	Groups map[string]*models.Group // local cache
 	mu     sync.RWMutex
 }
 
-
-
 // NewNode creates a new node
 func NewNode() *Node {
+
 	return &Node{
 		DHT:    dht.NewSimulatedDHT(),
 		Groups: make(map[string]*models.Group),
 	}
 }
 
+func NewNodeWithKDHT(kadDHT *kdht.IpfsDHT) *Node {
+
+	return &Node{
+		DHT:    dht.NewSimulatedDHT(),
+		KDHT:   kadDHT,
+		Groups: make(map[string]*models.Group),
+	}
+}
 
 // CreateGroup creates a new group
-func (n *Node) CreateGroup(groupID, name string, creator string) error {
+func (n *Node) CreateGroup(ctx context.Context, groupID, name string, creator string) error {
 	group := &models.Group{
 		ID:       groupID,
 		Name:     name,
@@ -48,16 +59,19 @@ func (n *Node) CreateGroup(groupID, name string, creator string) error {
 	n.mu.Unlock()
 
 	data, _ := json.Marshal(group)
-	n.DHT.Put("group:"+groupID, string(data))
+	key := "group:" + groupID
+	n.KDHT.PutValue(ctx, key, data)
 	return nil
 }
 
 // JoinGroup joins an existing group
-func (n *Node) JoinGroup(groupID, userID string) error {
+func (n *Node) JoinGroup(ctx context.Context, groupID, userID string) error {
 	// Fetch group from DHT
-	val, ok := n.DHT.Get("group:" + groupID)
-	if !ok {
-		return fmt.Errorf("group not found")
+
+	key := "group:" + groupID
+	val, err := n.KDHT.GetValue(ctx, key)
+	if err != nil {
+		return fmt.Errorf("group not found: %w", err)
 	}
 
 	var group models.Group
@@ -82,12 +96,12 @@ func (n *Node) JoinGroup(groupID, userID string) error {
 	n.mu.Unlock()
 
 	data, _ := json.Marshal(group)
-	n.DHT.Put("group:"+groupID, string(data))
+	n.KDHT.PutValue(ctx, key, data)
 	return nil
 }
 
 // AddExpense adds an expense to a group
-func (n *Node) AddExpense(groupID string, expense models.Expense) error {
+func (n *Node) AddExpense(ctx context.Context, groupID string, expense models.Expense) error {
 	n.mu.Lock()
 	group, exists := n.Groups[groupID]
 	n.mu.Unlock()
@@ -119,15 +133,17 @@ func (n *Node) AddExpense(groupID string, expense models.Expense) error {
 	}
 
 	data, _ := json.Marshal(group)
-	n.DHT.Put("group:"+groupID, string(data))
+	key := "group:" + groupID
+	n.KDHT.PutValue(ctx, key, data)
 	return nil
 }
 
 // SyncGroup syncs group data from DHT
-func (n *Node) SyncGroup(groupID string) error {
-	val, ok := n.DHT.Get("group:" + groupID)
-	if !ok {
-		return fmt.Errorf("group not found")
+func (n *Node) SyncGroup(ctx context.Context, groupID string) error {
+	key := "group:" + groupID
+	val, err := n.KDHT.GetValue(ctx, key)
+	if err != nil {
+		return fmt.Errorf("group not found: %w", err)
 	}
 
 	var remoteGroup models.Group
@@ -163,7 +179,7 @@ func (n *Node) SyncGroup(groupID string) error {
 }
 
 // StartPeriodicSync starts a goroutine to sync all groups periodically
-func (n *Node) StartPeriodicSync() {
+func (n *Node) StartPeriodicSync(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	go func() {
 		for range ticker.C {
@@ -174,7 +190,7 @@ func (n *Node) StartPeriodicSync() {
 			}
 			n.mu.RUnlock()
 			for _, id := range groupIDs {
-				n.SyncGroup(id)
+				n.SyncGroup(ctx, id)
 			}
 		}
 	}()

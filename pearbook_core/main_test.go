@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/khelechy/pearbook/crdt"
@@ -10,7 +11,7 @@ import (
 
 func TestCreateGroup(t *testing.T) {
 	node := node.NewNode()
-	err := node.CreateGroup("testgroup", "Test Group", "alice")
+	err := node.CreateGroup(context.Background(), "testgroup", "Test Group", "alice")
 	if err != nil {
 		t.Fatalf("Failed to create group: %v", err)
 	}
@@ -25,8 +26,8 @@ func TestCreateGroup(t *testing.T) {
 
 func TestJoinGroup(t *testing.T) {
 	node := node.NewNode()
-	node.CreateGroup("testgroup", "Test Group", "alice")
-	err := node.JoinGroup("testgroup", "bob")
+	node.CreateGroup(context.Background(), "testgroup", "Test Group", "alice")
+	err := node.JoinGroup(context.Background(), "testgroup", "bob")
 	if err != nil {
 		t.Fatalf("Failed to join group: %v", err)
 	}
@@ -42,8 +43,8 @@ func TestJoinGroup(t *testing.T) {
 
 func TestAddExpense(t *testing.T) {
 	node := node.NewNode()
-	node.CreateGroup("testgroup", "Test Group", "alice")
-	node.JoinGroup("testgroup", "bob")
+	node.CreateGroup(context.Background(), "testgroup", "Test Group", "alice")
+	node.JoinGroup(context.Background(), "testgroup", "bob")
 	expense := models.Expense{
 		ID:           "exp1",
 		Amount:       100.0,
@@ -51,7 +52,7 @@ func TestAddExpense(t *testing.T) {
 		Payer:        "alice",
 		Participants: []string{"alice", "bob"},
 	}
-	err := node.AddExpense("testgroup", expense)
+	err := node.AddExpense(context.Background(), "testgroup", expense)
 	if err != nil {
 		t.Fatalf("Failed to add expense: %v", err)
 	}
@@ -68,8 +69,8 @@ func TestAddExpense(t *testing.T) {
 
 func TestSyncGroup(t *testing.T) {
 	node := node.NewNode()
-	node.CreateGroup("testgroup", "Test Group", "alice")
-	err := node.SyncGroup("testgroup")
+	node.CreateGroup(context.Background(), "testgroup", "Test Group", "alice")
+	err := node.SyncGroup(context.Background(), "testgroup")
 	if err != nil {
 		t.Fatalf("Failed to sync group: %v", err)
 	}

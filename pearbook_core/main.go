@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/khelechy/pearbook/dht"
 	"github.com/khelechy/pearbook/models"
 	"github.com/khelechy/pearbook/node"
 
@@ -23,6 +24,8 @@ type server struct {
 }
 
 func (s *server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -33,7 +36,7 @@ func (s *server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		Creator string `json:"creator"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	err := s.CreateGroup(req.GroupID, req.Name, req.Creator)
+	err := s.CreateGroup(ctx, req.GroupID, req.Name, req.Creator)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -43,6 +46,8 @@ func (s *server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleJoinGroup(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -52,7 +57,7 @@ func (s *server) handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 		UserID  string `json:"user_id"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	err := s.JoinGroup(req.GroupID, req.UserID)
+	err := s.JoinGroup(ctx, req.GroupID, req.UserID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -62,6 +67,8 @@ func (s *server) handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -71,7 +78,7 @@ func (s *server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
 		Expense models.Expense `json:"expense"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	err := s.AddExpense(req.GroupID, req.Expense)
+	err := s.AddExpense(ctx, req.GroupID, req.Expense)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -81,6 +88,8 @@ func (s *server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetBalances(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -88,14 +97,26 @@ func (s *server) handleGetBalances(w http.ResponseWriter, r *http.Request) {
 	groupID := r.URL.Query().Get("group_id")
 	userID := r.URL.Query().Get("user_id")
 	// Sync before getting balances
-	s.SyncGroup(groupID)
+	s.SyncGroup(ctx, groupID)
 	balances := s.GetBalances(groupID, userID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(balances)
 }
 
 func main() {
-	n := node.NewNode()
+	ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+	// Setup libp2p DHT and host
+    kadDHT, host, err := dht.SetupLibp2p(ctx, "")
+    if err != nil {
+        log.Fatalf("Failed to setup libp2p: %v", err)
+    }
+    defer func() {
+        _ = host.Close()
+    }()
+
+	n := node.NewNodeWithKDHT(kadDHT)
 	srv := &server{Node: n}
 
 	// Setup HTTP routes
@@ -106,10 +127,10 @@ func main() {
 	mux.HandleFunc("/getBalances", srv.handleGetBalances)
 
 	// Start periodic sync
-	n.StartPeriodicSync()
+	n.StartPeriodicSync(ctx)
 
 	srvAddr := ":8080"
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:    srvAddr,
 		Handler: mux,
 	}
@@ -120,7 +141,7 @@ func main() {
 		myfigure.Print()
 
 		log.Println("Starting server on", srvAddr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("ListenAndServe(): %v", err)
 		}
 	}()
@@ -132,10 +153,17 @@ func main() {
 	<-stop
 	log.Println("Shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server Shutdown Failed:%+v", err)
-	}
-	log.Println("Server exited gracefully")
+	ctxTimeout, cancelTimeout := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelTimeout()
+    if err := httpServer.Shutdown(ctxTimeout); err != nil {
+        log.Fatalf("HTTP Server Shutdown Failed:%+v", err)
+    }
+    log.Println("HTTP server exited gracefully")
+
+    // Gracefully shutdown libp2p host
+    if err := host.Close(); err != nil {
+        log.Printf("Error closing libp2p host: %v", err)
+    } else {
+        log.Println("libp2p host closed gracefully")
+    }
 }
