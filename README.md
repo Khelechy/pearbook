@@ -4,6 +4,8 @@
 
 An offline first distributed expense tracker proof-of-concept demonstrating Conflict-Free Replicated Data Types (CRDTs) in a peer-to-peer network using Kademlia DHT, built for research on eventual consistency and the CAP theorem.
 
+[Reference research paper here](https://doi.org/10.64388/IREV9I2-1710338-8995)
+
 ## Overview
 
 PearBook is a decentralized application that allows users to track shared expenses without relying on central servers. It uses custom CRDT implementations (OR-Set, PN-Counter, OR-Map) over an actual Kademlia DHT using libp2p to ensure eventual consistency across distributed nodes.
