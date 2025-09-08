@@ -1,5 +1,7 @@
 ﻿# PearBook
 
+![PearBook](https://github.com/Khelechy/pearbook/blob/main/d5c27f66-1f5c-495f-900c-67358ae018a9.jpeg)
+
 An offline first distributed expense tracker proof-of-concept demonstrating Conflict-Free Replicated Data Types (CRDTs) in a peer-to-peer network using Kademlia DHT, built for research on eventual consistency and the CAP theorem.
 
 ## Overview
