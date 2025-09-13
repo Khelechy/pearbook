@@ -135,7 +135,7 @@ func main() {
 	mux.HandleFunc("/getBalances", srv.handleGetBalances)
 
 	// Start periodic sync
-	n.StartPeriodicSync(ctx)
+	n.StartPeriodicSync(ctx, 5) // 5 concurrent workers
 
 	srvAddr := fmt.Sprintf(":%s", apiPort)
 	httpServer := &http.Server{
