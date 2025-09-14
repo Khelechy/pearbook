@@ -1,6 +1,8 @@
 package dht
 
 import (
+	"context"
+	"fmt"
 	"sync"
 )
 
@@ -30,4 +32,19 @@ func (d *SimulatedDHT) Get(key string) (string, bool) {
 	defer d.mu.RUnlock()
 	val, ok := d.data[key]
 	return val, ok
+}
+
+// PutValue stores data in the DHT
+func (d *SimulatedDHT) PutValue(ctx context.Context, key string, value []byte) error {
+	d.Put(key, string(value))
+	return nil
+}
+
+// GetValue retrieves data from the DHT
+func (d *SimulatedDHT) GetValue(ctx context.Context, key string) ([]byte, error) {
+	val, ok := d.Get(key)
+	if !ok {
+		return nil, fmt.Errorf("key not found")
+	}
+	return []byte(val), nil
 }

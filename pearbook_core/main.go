@@ -134,8 +134,6 @@ func main() {
 	mux.HandleFunc("/addExpense", srv.handleAddExpense)
 	mux.HandleFunc("/getBalances", srv.handleGetBalances)
 
-	// Start periodic sync
-	n.StartPeriodicSync(ctx)
 
 	srvAddr := fmt.Sprintf(":%s", apiPort)
 	httpServer := &http.Server{
@@ -153,6 +151,9 @@ func main() {
 			log.Fatalf("ListenAndServe(): %v", err)
 		}
 	}()
+
+	// Start periodic sync
+	n.StartPeriodicSync(ctx, 2)
 
 
 	// Wait for SIGINT or SIGTERM
