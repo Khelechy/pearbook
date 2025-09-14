@@ -105,6 +105,7 @@ func (s *server) handleGetBalances(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	fmt.Println("Starting PearBook Node...")
 	godotenv.Load()
 
 	protocol := os.Getenv("DHT_PROTOCOL")
@@ -134,8 +135,6 @@ func main() {
 	mux.HandleFunc("/addExpense", srv.handleAddExpense)
 	mux.HandleFunc("/getBalances", srv.handleGetBalances)
 
-	// Start periodic sync
-	n.StartPeriodicSync(ctx, 5) // 5 concurrent workers
 
 	srvAddr := fmt.Sprintf(":%s", apiPort)
 	httpServer := &http.Server{
@@ -153,6 +152,9 @@ func main() {
 			log.Fatalf("ListenAndServe(): %v", err)
 		}
 	}()
+
+	// Start periodic sync
+	n.StartPeriodicSync(ctx, 2) // 2 concurrent workers
 
 
 	// Wait for SIGINT or SIGTERM

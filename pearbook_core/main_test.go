@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/khelechy/pearbook/crdt"
@@ -143,6 +144,58 @@ func TestPNCounterMerge(t *testing.T) {
 	c1.Merge(c2)
 	if c1.Value() != 15 {
 		t.Fatalf("Merge failed, value: %d", c1.Value())
+	}
+}
+
+func TestConcurrentCRDTMerge(t *testing.T) {
+	// Test concurrent merges for PN-Counter (used in balances)
+	c1 := crdt.NewPNCounter()
+	c1.Increment("node1", 10)
+
+	var wg sync.WaitGroup
+	numGoroutines := 10
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			c2 := crdt.NewPNCounter()
+			c2.Increment(fmt.Sprintf("node%d", id), int64(id))
+			c1.Merge(c2)
+		}(i)
+	}
+	wg.Wait()
+
+	expected := int64(10) // initial
+	for i := 0; i < numGoroutines; i++ {
+		if i != 1 { // node1 already has 10, so max(10,1)=10, not added
+			expected += int64(i)
+		}
+	}
+	if c1.Value() != expected {
+		t.Fatalf("Concurrent merge failed, expected %d, got %d", expected, c1.Value())
+	}
+
+	// Test ORSet concurrent adds/merges
+	set1 := crdt.NewORSet()
+	set1.Add("alice", "tag1")
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			set2 := crdt.NewORSet()
+			set2.Add(fmt.Sprintf("user%d", id), fmt.Sprintf("tag%d", id))
+			set1.Merge(set2)
+		}(i)
+	}
+	wg.Wait()
+
+	elements := set1.Elements()
+	if len(elements) != numGoroutines+1 {
+		t.Fatalf("Concurrent ORSet merge failed, expected %d elements, got %d", numGoroutines+1, len(elements))
+	}
+	if !contains(elements, "alice") {
+		t.Fatal("Alice not found after concurrent merge")
 	}
 }
 

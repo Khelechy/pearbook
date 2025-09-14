@@ -152,12 +152,17 @@ func (n *Node) JoinGroup(ctx context.Context, groupID, userID string) error {
 	if err != nil {
 		return fmt.Errorf("group not found: %w", err)
 	}
+
 	decompressed, err := decompressData([]byte(val))
 	if err != nil {
 		return fmt.Errorf("decompression failed: %w", err)
 	}
+
 	var group models.Group
-	json.Unmarshal(decompressed, &group)
+	err = json.Unmarshal(decompressed, &group)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal group: %w", err)
+	}
 
 	// Add member if not already
 	members := group.Members.Elements()
@@ -179,8 +184,15 @@ func (n *Node) JoinGroup(ctx context.Context, groupID, userID string) error {
 	n.shardLocks[shardIndex].Unlock()
 
 	data, _ := json.Marshal(group)
-	compressed, _ := compressData(data)
-	n.KDHT.PutValue(ctx, "/namespace/"+key, compressed)
+	compressed, err := compressData(data)
+	if err != nil {
+		return err
+	}
+	err = n.KDHT.PutValue(ctx, "/namespace/"+key, compressed)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -189,7 +201,7 @@ func (n *Node) AddExpense(ctx context.Context, groupID string, expense models.Ex
 	shardIndex := n.getShardIndex(groupID)
 	n.shardLocks[shardIndex].Lock()
 	group, exists := n.shards[shardIndex][groupID]
-	n.shardLocks[shardIndex].Unlock()
+
 	if !exists {
 		return fmt.Errorf("group not found")
 	}
@@ -217,11 +229,23 @@ func (n *Node) AddExpense(ctx context.Context, groupID string, expense models.Ex
 		group.Balances[user][expense.Payer].Increment(n.ID, int64(owed*100))
 	}
 
-	data, _ := json.Marshal(group)
+	data, err := json.Marshal(group)
+	if err != nil {
+		return err
+	}
+
 	key := fmt.Sprintf("group:%s", groupID)
-	if n.KDHT != nil {
-		compressed, _ := compressData(data)
-		n.KDHT.PutValue(ctx, "/namespace/"+key, compressed)
+	if n.KDHT == nil {
+		return fmt.Errorf("DHT not available")
+	}
+
+	compressed, err := compressData(data)
+	if err != nil {
+		return err
+	}
+	err = n.KDHT.PutValue(ctx, "/namespace/"+key, compressed)
+	if err != nil {
+		return err
 	}
 
 	// Invalidate balance cache for all participants
@@ -233,43 +257,41 @@ func (n *Node) AddExpense(ctx context.Context, groupID string, expense models.Ex
 	payerCacheKey := fmt.Sprintf("%s:%s", groupID, expense.Payer)
 	delete(n.cachedBalances, payerCacheKey)
 	n.balanceMu.Unlock()
+	n.shardLocks[shardIndex].Unlock()
 
 	return nil
 }
 
-
 // GetBalances returns the balances for a user in a group, using cache
 func (n *Node) GetBalances(groupID, userID string) map[string]float64 {
 	cacheKey := fmt.Sprintf("%s:%s", groupID, userID)
-	n.balanceMu.RLock()
+	n.balanceMu.Lock() // Exclusive lock for entire operation
 	if balances, exists := n.cachedBalances[cacheKey]; exists {
-		n.balanceMu.RUnlock()
+		n.balanceMu.Unlock()
 		return balances
 	}
-	n.balanceMu.RUnlock()
-
+	// Compute and set cache
 	shardIndex := n.getShardIndex(groupID)
 	n.shardLocks[shardIndex].RLock()
 	group, exists := n.shards[shardIndex][groupID]
 	n.shardLocks[shardIndex].RUnlock()
 	if !exists {
+		n.balanceMu.Unlock()
 		return nil
 	}
 	balances := make(map[string]float64)
 	for payer, counter := range group.Balances[userID] {
 		balances[payer] = float64(counter.Value()) / 100.0
 	}
-
-	// Cache the result
-	n.balanceMu.Lock()
 	n.cachedBalances[cacheKey] = balances
 	n.balanceMu.Unlock()
-
 	return balances
 }
 
 // SyncGroup syncs group data from DHT
 func (n *Node) SyncGroup(ctx context.Context, groupID string) error {
+	fmt.Printf("Syncing group %s\n", groupID)
+
 	if n.KDHT == nil {
 		return fmt.Errorf("DHT not available")
 	}
@@ -293,9 +315,16 @@ func (n *Node) SyncGroup(ctx context.Context, groupID string) error {
 	if !exists {
 		// If no local group, just set it
 		n.shards[shardIndex][groupID] = &remoteGroup
+		fmt.Printf("Group %s synced (new)\n", groupID)
 	} else {
+
 		// Merge CRDTs
 		localGroup.Members.Merge(remoteGroup.Members)
+
+		// Print new local members after merge
+		localMembers := localGroup.Members.Elements()
+		fmt.Printf("Local members after merge for group %s: %v\n", groupID, localMembers)
+
 		localGroup.Expenses.Merge(remoteGroup.Expenses)
 		// For balances, merge each PN-Counter concurrently
 		var wg sync.WaitGroup
@@ -312,11 +341,14 @@ func (n *Node) SyncGroup(ctx context.Context, groupID string) error {
 					}
 					localGroup.Balances[u][payer].Merge(remoteCounter)
 				}
+
+				fmt.Printf("Merged balances for user %s\n", u)
 			}(user, remoteBalances)
 		}
 		wg.Wait()
 		// Update non-CRDT fields
 		localGroup.Name = remoteGroup.Name
+		fmt.Printf("Group %s synced (updated)\n", groupID)
 	}
 	n.shardLocks[shardIndex].Unlock()
 
@@ -325,43 +357,61 @@ func (n *Node) SyncGroup(ctx context.Context, groupID string) error {
 
 // StartPeriodicSync starts a goroutine to sync all groups periodically with concurrency
 func (n *Node) StartPeriodicSync(ctx context.Context, numWorkers int) {
-	ticker := time.NewTicker(5 * time.Second)
+	fmt.Println("Starting periodic group sync")
+
+	// Perform initial sync immediately
+	n.performSync(ctx, numWorkers)
+
+	ticker := time.NewTicker(7 * time.Second)
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
-				// Collect groupIDs from all shards
-				var groupIDs []string
-				for i := 0; i < n.numShards; i++ {
-					n.shardLocks[i].RLock()
-					for id := range n.shards[i] {
-						groupIDs = append(groupIDs, id)
-					}
-					n.shardLocks[i].RUnlock()
-				}
-				// Use worker pool for concurrent sync
-				jobs := make(chan string, len(groupIDs))
-				var wg sync.WaitGroup
-				for i := 0; i < numWorkers; i++ {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						for groupID := range jobs {
-							ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
-							n.SyncGroup(ctxTimeout, groupID)
-							cancel()
-						}
-					}()
-				}
-				for _, id := range groupIDs {
-					jobs <- id
-				}
-				close(jobs)
-				wg.Wait()
+				n.performSync(ctx, numWorkers)
 			case <-ctx.Done():
 				ticker.Stop()
 				return
 			}
 		}
 	}()
+}
+
+// performSync performs the sync logic
+func (n *Node) performSync(ctx context.Context, numWorkers int) {
+	// Collect groupIDs from all shards
+	var groupIDs []string
+	for i := 0; i < n.numShards; i++ {
+		n.shardLocks[i].RLock()
+		for id := range n.shards[i] {
+			groupIDs = append(groupIDs, id)
+		}
+		n.shardLocks[i].RUnlock()
+	}
+	if len(groupIDs) == 0 {
+		fmt.Println("No groups to sync")
+		return
+	}
+	// Use worker pool for concurrent sync
+	jobs := make(chan string, len(groupIDs))
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for groupID := range jobs {
+				fmt.Printf("Syncing group %s\n", groupID)
+				ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+				err := n.SyncGroup(ctxTimeout, groupID)
+				cancel()
+				if err != nil {
+					fmt.Printf("Error syncing group %s: %v\n", groupID, err)
+				}
+			}
+		}()
+	}
+	for _, id := range groupIDs {
+		jobs <- id
+	}
+	close(jobs)
+	wg.Wait()
 }
