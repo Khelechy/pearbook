@@ -12,6 +12,8 @@ PearBook allows users to create groups, join them, add expenses, and track balan
 - **DHT**: Actual Kademlia DHT using libp2p
 - **Networking**: HTTP API for client interactions
 - **Storage**: Distributed via libp2p DHT
+- **Sharding**: 16-shard hash-based local cache for concurrency
+- **Concurrency**: Worker pools for efficient syncing operations
 
 ## Features
 - **Decentralized Groups**: Create and join groups without a central authority.
@@ -20,6 +22,7 @@ PearBook allows users to create groups, join them, add expenses, and track balan
 - **Offline Support**: Local replicas with eventual sync via DHT (periodic syncing every 5 seconds and on-demand for reads).
 - **HTTP API**: RESTful endpoints for client applications.
 - **Testing**: Unit tests for core functionality.
+- **Performance Optimizations**: Sharded cache and concurrent worker syncing for high throughput.
 
 ## Prerequisites
 - Go 1.19 or later (download from [golang.org](https://golang.org/dl/))
@@ -181,14 +184,14 @@ pearbook_core/
 ```
 
 ### Core Components
-- **Node**: Manages groups, DHT, and CRDT operations.
+- **Node**: Manages groups with a sharded local cache (16 shards for concurrency), DHT interactions, and CRDT operations using worker pools for syncing.
 - **CRDTs**: OR-Set for members, OR-Map for expenses, PN-Counter for balances—ensure eventual consistency without conflicts.
 - **Actual Kademlia DHT using libp2p**: Real P2P network for decentralized data storage and retrieval.
 - **HTTP API**: Simple REST interface for clients.
 
 ### Syncing Mechanism
 - **Joining**: Fetches group data when a user joins.
-- **Periodic**: Syncs all groups every 5 seconds in the background.
+- **Periodic**: Syncs all groups every 5 seconds in the background using concurrent worker pools for efficiency.
 - **On-Demand**: Syncs before balance queries for up-to-date data.
 - **Merging**: Uses CRDT Merge functions to resolve conflicts and achieve eventual consistency.
 - **Unique Tags**: Generates UUIDs for each CRDT operation to ensure proper conflict resolution.
@@ -198,6 +201,13 @@ pearbook_core/
 - **Eventual Consistency**: CRDTs handle concurrent updates.
 - **Partition Tolerant**: Works offline with local replicas.
 - **High Availability**: DHT ensures data accessibility.
+
+## Performance Optimizations
+
+- **Sharding**: Local cache divided into 16 shards using hash-based indexing to reduce lock contention and improve concurrency.
+- **Worker Pools**: Concurrent workers for periodic syncing, allowing multiple groups to sync simultaneously without blocking.
+- **Lazy Balance Computation**: Balances calculated on-demand to minimize unnecessary computations.
+- **Cache Invalidation**: Efficient invalidation on updates to ensure data freshness.
 
 ## Research Context
 This implementation serves as a case study for:

@@ -30,18 +30,20 @@ This project serves as a research prototype for exploring:
 - **Kademlia DHT Networking**: Actual DHT using libp2p for data storage and retrieval in a real P2P network.
 - **HTTP API**: RESTful endpoints for group management, expense addition, and balance queries.
 - **Eventual Consistency**: Merges data from multiple nodes to resolve conflicts.
+- **Sharded Local Cache**: Hash-based indexing with 16 shards for high concurrency and performance.
+- **Worker-Based Syncing**: Concurrent worker pools for efficient periodic data propagation.
 
 ## Architecture
 
 ### Core Components
-- **Node**: Manages groups, DHT, and CRDT operations.
+- **Node**: Manages groups with sharded local cache (16 shards), DHT, and CRDT operations using concurrent workers.
 - **CRDTs**: OR-Set for members, OR-Map for expenses, PN-Counter for balancesensure eventual consistency without conflicts.
 - **Actual Kademlia DHT using libp2p**: Real P2P network for decentralized data storage and retrieval.
 - **HTTP API**: Simple REST interface for clients.
 
 ### Syncing Mechanism
 - **Joining**: Fetches group data when a user joins.
-- **Periodic**: Syncs all groups every 5 seconds in the background.
+- **Periodic**: Syncs all groups every 5 seconds in the background using concurrent worker pools.
 - **On-Demand**: Syncs before balance queries for up-to-date data.
 - **Merging**: Uses CRDT Merge functions to resolve conflicts and achieve eventual consistency.
 - **Unique Tags**: Generates UUIDs for each CRDT operation to ensure proper conflict resolution.

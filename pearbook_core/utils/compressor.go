@@ -14,7 +14,9 @@ func CompressData(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	gz.Close()
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
 	return buf.Bytes(), nil
 }
 

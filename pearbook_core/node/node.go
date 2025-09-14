@@ -195,13 +195,15 @@ func (n *Node) AddExpense(ctx context.Context, groupID string, expense models.Ex
 	}
 
 	shardIndex := n.getShardIndex(groupID)
-	n.shardLocks[shardIndex].Lock()
+	n.shardLocks[shardIndex].RLock()
 	group, exists := n.shards[shardIndex][groupID]
+	n.shardLocks[shardIndex].RUnlock()
 
 	if !exists {
-		n.shardLocks[shardIndex].Unlock()
 		return fmt.Errorf("group not found")
 	}
+
+	n.shardLocks[shardIndex].Lock()
 
 	// Calculate splits (equal split for simplicity)
 	numParticipants := len(expense.Participants)
@@ -226,37 +228,31 @@ func (n *Node) AddExpense(ctx context.Context, groupID string, expense models.Ex
 		group.Balances[user][expense.Payer].Increment(n.ID, int64(owed*100))
 	}
 
+	defer n.shardLocks[shardIndex].Unlock()
+
 	data, err := json.Marshal(group)
 	if err != nil {
-		n.shardLocks[shardIndex].Unlock()
 		return fmt.Errorf("failed to marshal group data: %w", err)
 	}
 
 	compressedData, err := utils.CompressData(data)
 	if err != nil {
-		n.shardLocks[shardIndex].Unlock()
 		return fmt.Errorf("failed to compress group data: %w", err)
 	}
 
 	key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
-	if n.KDHT == nil {
-		n.shardLocks[shardIndex].Unlock()
-		return fmt.Errorf("DHT not available")
-	}
+
 	if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
 		err = ipfs.PutValue(ctx, key, compressedData)
 	} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
 		err = sim.PutValue(ctx, key, compressedData)
 	} else {
-		n.shardLocks[shardIndex].Unlock()
 		return fmt.Errorf("unsupported DHT type")
 	}
 	if err != nil {
-		n.shardLocks[shardIndex].Unlock()
 		return fmt.Errorf("failed to put group data in DHT: %w", err)
 	}
 
-	n.shardLocks[shardIndex].Unlock()
 	return nil
 }
 

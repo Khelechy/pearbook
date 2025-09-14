@@ -41,7 +41,7 @@ func (d *SimulatedDHT) PutValue(ctx context.Context, key string, value []byte) e
 }
 
 // GetValue retrieves data from the DHT
-func (d *SimulatedDHT) GetValue(ctx context.Context, key string, opts ...interface{}) ([]byte, error) {
+func (d *SimulatedDHT) GetValue(ctx context.Context, key string) ([]byte, error) {
 	val, ok := d.Get(key)
 	if !ok {
 		return nil, fmt.Errorf("key not found")
