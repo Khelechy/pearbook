@@ -25,21 +25,24 @@ This project serves as a research prototype for exploring:
 
 ## Features
 
-- **Decentralized Groups**: Create and join expense groups without a central server.
-- **CRDT-Based Syncing**: Automatic conflict resolution using OR-Set (members), OR-Map (expenses), and PN-Counter (balances).
-- **Kademlia DHT Networking**: Actual DHT using libp2p for data storage and retrieval in a real P2P network.
-- **HTTP API**: RESTful endpoints for group management, expense addition, and balance queries.
-- **Eventual Consistency**: Merges data from multiple nodes to resolve conflicts.
-- **Sharded Local Cache**: Hash-based indexing with 16 shards for high concurrency and performance.
-- **Worker-Based Syncing**: Concurrent worker pools for efficient periodic data propagation.
+- **Cryptographic Security**: Client-side ECDSA key generation with digital signatures for all operations
+- **Decentralized Groups**: Create and join expense groups without a central server
+- **User Identity Management**: Separation of operational user IDs and display names
+- **CRDT-Based Syncing**: Automatic conflict resolution using OR-Set (members), OR-Map (expenses), and PN-Counter (balances)
+- **Kademlia DHT Networking**: Actual DHT using libp2p for data storage and retrieval in a real P2P network
+- **RESTful HTTP API**: Proper GET/POST endpoints for group management, expense operations, and balance queries
+- **Eventual Consistency**: Merges data from multiple nodes to resolve conflicts
+- **Sharded Local Cache**: Hash-based indexing with 16 shards for high concurrency and performance
+- **Worker-Based Syncing**: Concurrent worker pools for efficient periodic data propagation
 
 ## Architecture
 
 ### Core Components
-- **Node**: Manages groups with sharded local cache (16 shards), DHT, and CRDT operations using concurrent workers.
-- **CRDTs**: OR-Set for members, OR-Map for expenses, PN-Counter for balancesensure eventual consistency without conflicts.
-- **Actual Kademlia DHT using libp2p**: Real P2P network for decentralized data storage and retrieval.
-- **HTTP API**: Simple REST interface for clients.
+- **Cryptographic Security**: ECDSA key pairs generated client-side with digital signature verification
+- **Node**: Manages groups with sharded local cache (16 shards), DHT, and CRDT operations using concurrent workers
+- **CRDTs**: OR-Set for members, OR-Map for expenses, PN-Counter for balances ensure eventual consistency without conflicts
+- **Actual Kademlia DHT using libp2p**: Real P2P network for decentralized data storage and retrieval
+- **HTTP API**: RESTful interface with GET/POST methods and JSON request/response formats
 
 ### Syncing Mechanism
 - **Joining**: Fetches group data when a user joins.
