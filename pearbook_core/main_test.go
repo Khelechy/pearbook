@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/khelechy/pearbook/crdt"
 	"github.com/khelechy/pearbook/dht"
@@ -35,7 +36,27 @@ func (m *MockKDHT) GetValue(ctx context.Context, key string) ([]byte, error) {
 
 func TestCreateGroup(t *testing.T) {
 	node := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
-	err := node.CreateGroup(context.Background(), "testgroup", "Test Group", "alice")
+
+	// Create signed operation for group creation
+	signedOp := models.SignedOperation{
+		Operation: "create_group",
+		GroupID:   "testgroup",
+		UserID:    "alice",
+		Timestamp: time.Now().Unix(),
+		Data: map[string]interface{}{
+			"group": map[string]interface{}{
+				"id":   "testgroup",
+				"name": "Test Group",
+			},
+			"user": map[string]interface{}{
+				"user_name":  "Alice Smith",
+				"public_key": "mock-public-key-alice",
+			},
+		},
+		Signature: []byte("mock-signature"), // Mock signature for testing
+	}
+
+	err := node.CreateGroup(context.Background(), signedOp)
 	if err != nil {
 		t.Fatalf("Failed to create group: %v", err)
 	}
@@ -46,48 +67,190 @@ func TestCreateGroup(t *testing.T) {
 
 func TestJoinGroup(t *testing.T) {
 	node := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
-	node.CreateGroup(context.Background(), "testgroup", "Test Group", "alice")
-	err := node.JoinGroup(context.Background(), "testgroup", "bob")
+
+	// Create group first
+	createOp := models.SignedOperation{
+		Operation: "create_group",
+		GroupID:   "testgroup",
+		UserID:    "alice",
+		Timestamp: time.Now().Unix(),
+		Data: map[string]interface{}{
+			"group": map[string]interface{}{
+				"id":   "testgroup",
+				"name": "Test Group",
+			},
+			"user": map[string]interface{}{
+				"user_name":  "Alice Smith",
+				"public_key": "mock-public-key-alice",
+			},
+		},
+		Signature: []byte("mock-signature"),
+	}
+	node.CreateGroup(context.Background(), createOp)
+
+	// Join group
+	joinOp := models.SignedOperation{
+		Operation: "join_group",
+		GroupID:   "testgroup",
+		UserID:    "bob",
+		Timestamp: time.Now().Unix(),
+		Data: map[string]interface{}{
+			"user": map[string]interface{}{
+				"user_name":  "Bob Johnson",
+				"public_key": "mock-public-key-bob",
+			},
+		},
+		Signature: []byte("mock-signature"),
+	}
+	err := node.JoinGroup(context.Background(), joinOp)
 	if err != nil {
 		t.Fatalf("Failed to join group: %v", err)
 	}
-	members := node.GetGroups()["testgroup"].Members.Elements()
-	if len(members) != 2 {
-		t.Fatalf("Expected 2 members, got %d", len(members))
+
+	// Check that join request was created
+	requestID := "testgroup:bob"
+	_, exists := node.GetGroups()["testgroup"].PendingJoins.Get(requestID)
+	if !exists {
+		t.Fatal("Join request not created")
 	}
-	if !contains(members, "bob") {
-		t.Fatal("Bob not added to members")
+
+	// Only alice should be a member initially
+	members := node.GetGroups()["testgroup"].Members.Keys()
+	if len(members) != 1 || members[0] != "alice" {
+		t.Fatalf("Expected only alice as member, got %v", members)
 	}
 }
 
 func TestAddExpense(t *testing.T) {
 	node := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
-	node.CreateGroup(context.Background(), "testgroup", "Test Group", "alice")
-	node.JoinGroup(context.Background(), "testgroup", "bob")
-	expense := models.Expense{
-		ID:           "exp1",
-		Amount:       100.0,
-		Description:  "Dinner",
-		Payer:        "alice",
-		Participants: []string{"alice", "bob"},
+
+	// Create group
+	createOp := models.SignedOperation{
+		Operation: "create_group",
+		GroupID:   "testgroup",
+		UserID:    "alice",
+		Timestamp: time.Now().Unix(),
+		Data: map[string]interface{}{
+			"group": map[string]interface{}{
+				"id":   "testgroup",
+				"name": "Test Group",
+			},
+			"user": map[string]interface{}{
+				"user_name":  "Alice Smith",
+				"public_key": "mock-public-key-alice",
+			},
+		},
+		Signature: []byte("mock-signature"),
 	}
-	err := node.AddExpense(context.Background(), "testgroup", expense)
+	node.CreateGroup(context.Background(), createOp)
+
+	// Bob joins
+	joinOp := models.SignedOperation{
+		Operation: "join_group",
+		GroupID:   "testgroup",
+		UserID:    "bob",
+		Timestamp: time.Now().Unix(),
+		Data: map[string]interface{}{
+			"user": map[string]interface{}{
+				"user_name":  "Bob Johnson",
+				"public_key": "mock-public-key-bob",
+			},
+		},
+		Signature: []byte("mock-signature"),
+	}
+	node.JoinGroup(context.Background(), joinOp)
+
+	// Approve Bob's join request
+	approveOp := models.SignedOperation{
+		Operation: "approve_join",
+		GroupID:   "testgroup",
+		UserID:    "alice",
+		Timestamp: time.Now().Unix(),
+		Data: map[string]interface{}{
+			"request_id": "testgroup:bob",
+		},
+		Signature: []byte("mock-signature"),
+	}
+	err := node.ApproveJoin(context.Background(), approveOp)
+	if err != nil {
+		t.Fatalf("Failed to approve join: %v", err)
+	}
+
+	// Add expense
+	expenseOp := models.SignedOperation{
+		Operation: "add_expense",
+		GroupID:   "testgroup",
+		UserID:    "alice",
+		Timestamp: time.Now().Unix(),
+		Data: map[string]interface{}{
+			"expense": map[string]interface{}{
+				"id":           "exp1",
+				"amount":       100.0,
+				"description":  "Dinner",
+				"participants": []interface{}{"alice", "bob"}, // Use interface{} slice
+			},
+		},
+		Signature: []byte("mock-signature"),
+	}
+	err = node.AddExpense(context.Background(), expenseOp)
 	if err != nil {
 		t.Fatalf("Failed to add expense: %v", err)
 	}
+
 	exp, ok := node.GetGroups()["testgroup"].Expenses.Get("exp1")
 	if !ok || exp == nil {
 		t.Fatal("Expense not added to ORMap")
 	}
-	balances := node.GetBalances("testgroup", "bob")
-	if balances["alice"] != 50.0 {
-		t.Fatalf("Expected balance 50, got %f", balances["alice"])
+
+	// Get balances
+	balanceOp := models.SignedOperation{
+		Operation: "get_balances",
+		GroupID:   "testgroup",
+		UserID:    "bob",
+		Timestamp: time.Now().Unix(),
+		Data:      map[string]interface{}{},
+		Signature: []byte("mock-signature"),
+	}
+	balances, err := node.GetBalances(context.Background(), balanceOp)
+	if err != nil {
+		t.Fatalf("Failed to get balances: %v", err)
+	}
+	aliceBalance, exists := balances["alice"]
+	if !exists {
+		t.Fatal("Alice balance not found")
+	}
+	amount, ok := aliceBalance["amount"].(float64)
+	if !ok {
+		t.Fatal("Amount field not found or invalid")
+	}
+	if amount != 50.0 {
+		t.Fatalf("Expected balance 50, got %f", amount)
 	}
 }
 
 func TestSyncGroup(t *testing.T) {
 	node := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
-	node.CreateGroup(context.Background(), "testgroup", "Test Group", "alice")
+
+	// Create group first
+	createOp := models.SignedOperation{
+		Operation: "create_group",
+		GroupID:   "testgroup",
+		UserID:    "alice",
+		Timestamp: time.Now().Unix(),
+		Data: map[string]interface{}{
+			"group": map[string]interface{}{
+				"id":   "testgroup",
+				"name": "Test Group",
+			},
+			"user": map[string]interface{}{
+				"user_name":  "Alice Smith",
+				"public_key": "mock-public-key-alice",
+			},
+		},
+		Signature: []byte("mock-signature"),
+	}
+	node.CreateGroup(context.Background(), createOp)
+
 	err := node.SyncGroup(context.Background(), "testgroup")
 	if err != nil {
 		t.Fatalf("Failed to sync group: %v", err)

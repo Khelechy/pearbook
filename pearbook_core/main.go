@@ -16,7 +16,7 @@ import (
 	"github.com/khelechy/pearbook/node"
 
 	"github.com/common-nighthawk/go-figure"
-    "github.com/joho/godotenv"
+	"github.com/joho/godotenv"
 )
 
 // Local wrapper type for HTTP handlers
@@ -31,13 +31,12 @@ func (s *server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var req struct {
-		GroupID string `json:"group_id"`
-		Name    string `json:"name"`
-		Creator string `json:"creator"`
+	var signedOp models.SignedOperation
+	if err := json.NewDecoder(r.Body).Decode(&signedOp); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
 	}
-	json.NewDecoder(r.Body).Decode(&req)
-	err := s.CreateGroup(ctx, req.GroupID, req.Name, req.Creator)
+	err := s.CreateGroup(ctx, signedOp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -53,18 +52,18 @@ func (s *server) handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var req struct {
-		GroupID string `json:"group_id"`
-		UserID  string `json:"user_id"`
+	var signedOp models.SignedOperation
+	if err := json.NewDecoder(r.Body).Decode(&signedOp); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
 	}
-	json.NewDecoder(r.Body).Decode(&req)
-	err := s.JoinGroup(ctx, req.GroupID, req.UserID)
+	err := s.JoinGroup(ctx, signedOp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "Joined group")
+	fmt.Fprint(w, "Join request submitted")
 }
 
 func (s *server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
@@ -74,12 +73,12 @@ func (s *server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var req struct {
-		GroupID string         `json:"group_id"`
-		Expense models.Expense `json:"expense"`
+	var signedOp models.SignedOperation
+	if err := json.NewDecoder(r.Body).Decode(&signedOp); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
 	}
-	json.NewDecoder(r.Body).Decode(&req)
-	err := s.AddExpense(ctx, req.GroupID, req.Expense)
+	err := s.AddExpense(ctx, signedOp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -95,13 +94,88 @@ func (s *server) handleGetBalances(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Extract parameters from query string
 	groupID := r.URL.Query().Get("group_id")
 	userID := r.URL.Query().Get("user_id")
-	// Sync before getting balances
-	s.SyncGroup(ctx, groupID)
-	balances := s.GetBalances(groupID, userID)
+
+	if groupID == "" || userID == "" {
+		http.Error(w, "Missing required parameters: group_id and user_id", http.StatusBadRequest)
+		return
+	}
+
+	// Create minimal signed operation for read-only request
+	signedOp := models.SignedOperation{
+		Operation: "get_balances",
+		GroupID:   groupID,
+		UserID:    userID,
+		Timestamp: time.Now().Unix(),
+		Data:      map[string]interface{}{},
+	}
+
+	balances, err := s.GetBalances(ctx, signedOp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(balances)
+}
+
+func (s *server) handleGetPendingJoins(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract parameters from query string
+	groupID := r.URL.Query().Get("group_id")
+	userID := r.URL.Query().Get("user_id")
+
+	if groupID == "" || userID == "" {
+		http.Error(w, "Missing required parameters: group_id and user_id", http.StatusBadRequest)
+		return
+	}
+
+	// Create minimal signed operation for read-only request
+	signedOp := models.SignedOperation{
+		Operation: "get_pending_joins",
+		GroupID:   groupID,
+		UserID:    userID,
+		Timestamp: time.Now().Unix(),
+		Data:      map[string]interface{}{},
+	}
+
+	pendingJoins, err := s.GetPendingJoins(ctx, signedOp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(pendingJoins)
+}
+
+func (s *server) handleApproveJoin(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var signedOp models.SignedOperation
+	if err := json.NewDecoder(r.Body).Decode(&signedOp); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	err := s.ApproveJoin(ctx, signedOp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "Join request approved")
 }
 
 func main() {
@@ -113,16 +187,16 @@ func main() {
 	apiPort := os.Getenv("API_PORT")
 
 	ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+	defer cancel()
 
 	// Setup libp2p DHT and host
-    kadDHT, host, err := dht.SetupLibp2p(ctx, bootstrapPeer, bootstrapSetupPort, protocol)
-    if err != nil {
-        log.Fatalf("Failed to setup libp2p: %v", err)
-    }
-    defer func() {
-        _ = host.Close()
-    }()
+	kadDHT, host, err := dht.SetupLibp2p(ctx, bootstrapPeer, bootstrapSetupPort, protocol)
+	if err != nil {
+		log.Fatalf("Failed to setup libp2p: %v", err)
+	}
+	defer func() {
+		_ = host.Close()
+	}()
 
 	n := node.NewNodeWithKDHT(kadDHT)
 	srv := &server{Node: n}
@@ -133,7 +207,8 @@ func main() {
 	mux.HandleFunc("/joinGroup", srv.handleJoinGroup)
 	mux.HandleFunc("/addExpense", srv.handleAddExpense)
 	mux.HandleFunc("/getBalances", srv.handleGetBalances)
-
+	mux.HandleFunc("/getPendingJoins", srv.handleGetPendingJoins)
+	mux.HandleFunc("/approveJoin", srv.handleApproveJoin)
 
 	srvAddr := fmt.Sprintf(":%s", apiPort)
 	httpServer := &http.Server{
@@ -155,7 +230,6 @@ func main() {
 	// Start periodic sync
 	n.StartPeriodicSync(ctx, 2)
 
-
 	// Wait for SIGINT or SIGTERM
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -164,15 +238,15 @@ func main() {
 
 	ctxTimeout, cancelTimeout := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelTimeout()
-    if err := httpServer.Shutdown(ctxTimeout); err != nil {
-        log.Fatalf("HTTP Server Shutdown Failed:%+v", err)
-    }
-    log.Println("HTTP server exited gracefully")
+	if err := httpServer.Shutdown(ctxTimeout); err != nil {
+		log.Fatalf("HTTP Server Shutdown Failed:%+v", err)
+	}
+	log.Println("HTTP server exited gracefully")
 
-    // Gracefully shutdown libp2p host
-    if err := host.Close(); err != nil {
-        log.Printf("Error closing libp2p host: %v", err)
-    } else {
-        log.Println("libp2p host closed gracefully")
-    }
+	// Gracefully shutdown libp2p host
+	if err := host.Close(); err != nil {
+		log.Printf("Error closing libp2p host: %v", err)
+	} else {
+		log.Println("libp2p host closed gracefully")
+	}
 }

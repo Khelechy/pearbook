@@ -8,21 +8,25 @@ PearBook allows users to create groups, join them, add expenses, and track balan
 
 ### Key Technologies
 - **Language**: Go 1.19+
+- **Cryptography**: ECDSA digital signatures with client-side key generation
 - **CRDTs**: Custom implementations of OR-Set (for group members), OR-Map (for expenses), and PN-Counter (for balances)
 - **DHT**: Actual Kademlia DHT using libp2p
-- **Networking**: HTTP API for client interactions
+- **Networking**: RESTful HTTP API with GET/POST methods
 - **Storage**: Distributed via libp2p DHT
+- **User Identity**: Separation of operational user IDs (public key derived) and display names
 - **Sharding**: 16-shard hash-based local cache for concurrency
 - **Concurrency**: Worker pools for efficient syncing operations
 
 ## Features
-- **Decentralized Groups**: Create and join groups without a central authority.
-- **Expense Management**: Add expenses with equal splits, track participants and payers (using OR-Map CRDT for conflict-free storage).
-- **Balance Tracking**: CRDT-based balances for owed amounts, ensuring conflict-free updates (using PN-Counter CRDT).
-- **Offline Support**: Local replicas with eventual sync via DHT (periodic syncing every 5 seconds and on-demand for reads).
-- **HTTP API**: RESTful endpoints for client applications.
-- **Testing**: Unit tests for core functionality.
-- **Performance Optimizations**: Sharded cache and concurrent worker syncing for high throughput.
+- **Cryptographic Security**: Client-side ECDSA key generation with digital signature verification for all write operations
+- **User Identity Management**: Separation of operational user IDs (derived from public keys) and display names
+- **Decentralized Groups**: Create and join groups with approval-based membership
+- **Expense Management**: Add expenses with equal splits, track participants and payers (using OR-Map CRDT for conflict-free storage)
+- **Balance Tracking**: CRDT-based balances for owed amounts with enriched responses including user names
+- **Offline Support**: Local replicas with eventual sync via DHT (periodic syncing every 5 seconds and on-demand for reads)
+- **RESTful HTTP API**: GET/POST endpoints with JSON request/response formats
+- **Testing**: Unit tests for core functionality including cryptographic operations
+- **Performance Optimizations**: Sharded cache and concurrent worker syncing for high throughput
 
 ## Prerequisites
 - Go 1.19 or later (download from [golang.org](https://golang.org/dl/))
@@ -74,81 +78,172 @@ PearBook allows users to create groups, join them, add expenses, and track balan
 
 ## API Usage
 
-The application exposes a RESTful HTTP API for client interactions. All requests/responses use JSON.
+The application exposes a RESTful HTTP API for client interactions. All requests/responses use JSON. The API implements cryptographic security with client-side key generation and digital signatures.
+
+### Prerequisites for API Usage
+
+**Client-Side Key Generation:**
+Before using the API, clients must generate ECDSA key pairs:
+
+```go
+// Example Go code for key generation
+privateKey, publicKey, err := utils.GenerateKeyPair()
+userID := utils.GenerateUserID(publicKey)
+```
+
+**Digital Signatures:**
+For write operations, clients must sign operation data:
+
+```go
+// Create operation data
+opData := utils.CreateOperationData(operation, groupID, userID, timestamp, data)
+
+// Sign with private key
+signature, err := utils.SignData(privateKey, opData)
+```
 
 ### Endpoints
 
 #### 1. Create a Group
 - **Endpoint**: `POST /createGroup`
+- **Description**: Creates a new expense group with the creator as the first approved member
 - **Request Body**:
   ```json
   {
-    "groupId": "group1",
-    "name": "Trip to Paris",
-    "creator": "alice"
+    "operation": "create_group",
+    "group_id": "group123",
+    "user_id": "a1b2c3d4e5f67890",
+    "user_name": "Alice Johnson",
+    "timestamp": 1638360000,
+    "data": {
+      "group": {
+        "id": "group123",
+        "name": "Trip to Paris"
+      },
+      "user": {
+        "user_name": "Alice Johnson",
+        "public_key": "0462c2d3...[65-byte hex-encoded public key]"
+      }
+    },
+    "signature": "1a2b3c4d...[64-byte hex-encoded signature]"
   }
   ```
-- **Response**: `200 OK` with "Group created"
-- **Example**:
-  ```bash
-  curl -X POST http://localhost:8080/createGroup \
-    -H "Content-Type: application/json" \
-    -d '{"groupId": "group1", "name": "Trip", "creator": "alice"}'
-  ```
+- **Response**: `200 OK` with `"Group created"`
+- **Security**: Requires valid digital signature from creator
 
 #### 2. Join a Group
 - **Endpoint**: `POST /joinGroup`
+- **Description**: Submits a join request for an existing group (requires approval from existing members)
 - **Request Body**:
   ```json
   {
-    "groupId": "group1",
-    "userId": "bob"
+    "operation": "join_group",
+    "group_id": "group123",
+    "user_id": "b2c3d4e5f6789012",
+    "user_name": "Bob Smith",
+    "timestamp": 1638360001,
+    "data": {
+      "user": {
+        "user_name": "Bob Smith",
+        "public_key": "0462c2d3...[65-byte hex-encoded public key]"
+      }
+    },
+    "signature": "2b3c4d5e...[64-byte hex-encoded signature]"
   }
   ```
-- **Response**: `200 OK` with "Joined group"
-- **Example**:
-  ```bash
-  curl -X POST http://localhost:8080/joinGroup \
-    -H "Content-Type: application/json" \
-    -d '{"groupId": "group1", "userId": "bob"}'
-  ```
+- **Response**: `200 OK` with `"Join request submitted"`
+- **Security**: Requires valid digital signature from requester
 
-#### 3. Add an Expense
-- **Endpoint**: `POST /addExpense`
+#### 3. Approve Join Request
+- **Endpoint**: `POST /approveJoin`
+- **Description**: Approves a pending join request (requires majority approval from existing members)
 - **Request Body**:
   ```json
   {
-    "groupId": "group1",
-    "expense": {
-      "id": "exp1",
-      "amount": 100.0,
-      "description": "Dinner",
-      "payer": "alice",
-      "participants": ["alice", "bob"]
+    "operation": "approve_join",
+    "group_id": "group123",
+    "user_id": "a1b2c3d4e5f67890",
+    "timestamp": 1638360002,
+    "data": {
+      "request_id": "group123:b2c3d4e5f6789012"
+    },
+    "signature": "3c4d5e6f...[64-byte hex-encoded signature]"
+  }
+  ```
+- **Response**: `200 OK` with `"Join request approved"`
+- **Security**: Requires valid digital signature from approver
+
+#### 4. Add an Expense
+- **Endpoint**: `POST /addExpense`
+- **Description**: Adds a new expense to a group with equal splits among participants
+- **Request Body**:
+  ```json
+  {
+    "operation": "add_expense",
+    "group_id": "group123",
+    "user_id": "a1b2c3d4e5f67890",
+    "timestamp": 1638360003,
+    "data": {
+      "expense": {
+        "id": "exp1",
+        "amount": 100.0,
+        "description": "Dinner at restaurant",
+        "participants": ["a1b2c3d4e5f67890", "b2c3d4e5f6789012"]
+      }
+    },
+    "signature": "4d5e6f7g...[64-byte hex-encoded signature]"
+  }
+  ```
+- **Response**: `200 OK` with `"Expense added"`
+- **Notes**: Splits are calculated equally; balances updated using PN-Counter CRDT
+- **Security**: Requires valid digital signature from expense creator
+
+#### 5. Get Balances
+- **Endpoint**: `GET /getBalances?group_id=group123&user_id=a1b2c3d4e5f67890`
+- **Description**: Retrieves balance information for a user in a group
+- **Response**: `200 OK` with enriched balance data:
+  ```json
+  {
+    "a1b2c3d4e5f67890": {
+      "user_id": "a1b2c3d4e5f67890",
+      "user_name": "Alice Johnson",
+      "amount": 50.0
     }
   }
   ```
-- **Response**: `200 OK` with "Expense added"
-- **Notes**: Splits are calculated equally; balances updated using PN-Counter CRDT.
-- **Example**:
-  ```bash
-  curl -X POST http://localhost:8080/addExpense \
-    -H "Content-Type: application/json" \
-    -d '{"groupId": "group1", "expense": {"id": "exp1", "amount": 100.0, "description": "Dinner", "payer": "alice", "participants": ["alice", "bob"]}}'
-  ```
+- **Notes**: Returns enriched data with both user IDs and display names
 
-#### 4. Get Balances
-- **Endpoint**: `GET /getBalances?groupId=<groupId>&userId=<userId>`
-- **Response**: `200 OK` with JSON like `{"alice": 50.0}`
-- **Notes**: Syncs with DHT before returning balances for freshness.
-- **Example**:
-  ```bash
-  curl "http://localhost:8080/getBalances?groupId=group1&userId=bob"
+#### 6. Get Pending Joins
+- **Endpoint**: `GET /getPendingJoins?group_id=group123&user_id=a1b2c3d4e5f67890`
+- **Description**: Retrieves all pending join requests for a group
+- **Response**: `200 OK` with array of pending requests:
+  ```json
+  {
+    "group123:b2c3d4e5f6789012": {
+      "requester_id": "b2c3d4e5f6789012",
+      "user_name": "Bob Smith",
+      "public_key": "0462c2d3...",
+      "timestamp": 1638360001,
+      "approvals": {
+        "a1b2c3d4e5f67890": "signature_data..."
+      }
+    }
+  }
   ```
+- **Notes**: Only accessible by approved group members
 
 ### Error Handling
-- Invalid requests return `400 Bad Request` or `500 Internal Server Error` with error messages.
-- Ensure `groupId` and `userId` are valid strings.
+- **400 Bad Request**: Invalid JSON, missing required fields, or malformed data
+- **401 Unauthorized**: Invalid digital signature or insufficient permissions
+- **404 Not Found**: Group or user not found
+- **500 Internal Server Error**: Server-side errors with descriptive messages
+
+### Security Model
+- **Write Operations**: Require valid ECDSA digital signatures
+- **Read Operations**: Require only group membership verification
+- **Key Management**: Public keys are stored with user profiles for signature verification
+- **User IDs**: Derived from public keys using SHA256 hash for uniqueness
+- **Display Names**: User-provided names stored separately from operational IDs
 
 ## Testing
 
@@ -157,17 +252,77 @@ Run the built-in tests:
 ```bash
 go test
 ```
-This executes tests for group creation, joining, expense addition, and balance retrieval. Expected output: `PASS` with test counts.
+This executes tests for group creation, joining, expense addition, balance retrieval, and cryptographic operations. Expected output: `PASS` with test counts.
 
-### Manual Testing
-1. Start the server as described.
-2. Use curl commands above to interact via API.
-3. Verify balances update correctly after adding expenses.
-4. Test edge cases: Non-existent groups, invalid users, etc.
+### Manual Testing with Cryptographic Operations
+
+#### Generate Test Keys and User IDs
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/khelechy/pearbook/utils"
+)
+
+func main() {
+    // Generate keys for Alice
+    alicePrivate, alicePublic, _ := utils.GenerateKeyPair()
+    aliceUserID := utils.GenerateUserID(alicePublic)
+    fmt.Printf("Alice User ID: %s\n", aliceUserID)
+    fmt.Printf("Alice Public Key: %x\n", alicePublic)
+
+    // Generate keys for Bob
+    bobPrivate, bobPublic, _ := utils.GenerateKeyPair()
+    bobUserID := utils.GenerateUserID(bobPublic)
+    fmt.Printf("Bob User ID: %s\n", bobUserID)
+    fmt.Printf("Bob Public Key: %x\n", bobPublic)
+
+    // Example: Sign operation data
+    opData := utils.CreateOperationData("create_group", "group123", aliceUserID, 1638360000, map[string]interface{}{
+        "group": map[string]interface{}{
+            "id": "group123",
+            "name": "Test Group",
+        },
+        "user": map[string]interface{}{
+            "user_name": "Alice Johnson",
+            "public_key": fmt.Sprintf("%x", alicePublic),
+        },
+    })
+
+    signature, _ := utils.SignData(alicePrivate, opData)
+    fmt.Printf("Signature: %x\n", signature)
+}
+```
+
+#### Test API Endpoints
+Use the generated keys and signatures in API requests:
+
+```bash
+# Create group with cryptographic signature
+curl -X POST http://localhost:8080/createGroup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operation": "create_group",
+    "group_id": "group123",
+    "user_id": "'$ALICE_USER_ID'",
+    "user_name": "Alice Johnson",
+    "timestamp": 1638360000,
+    "data": {
+      "group": {"id": "group123", "name": "Test Group"},
+      "user": {"user_name": "Alice Johnson", "public_key": "'$ALICE_PUBLIC_KEY'"}
+    },
+    "signature": "'$SIGNATURE'"
+  }'
+
+# Get balances (no signature required)
+curl "http://localhost:8080/getBalances?group_id=group123&user_id=$ALICE_USER_ID"
+```
 
 ### Integration Testing
-- Simulate multiple nodes by running multiple instances (modify ports).
-- Use the actual libp2p DHT to test data replication across peers.
+- Simulate multiple nodes by running multiple instances (modify ports)
+- Use the actual libp2p DHT to test data replication across peers
+- Test cryptographic signature verification with invalid signatures
 
 ## Architecture
 
@@ -184,10 +339,12 @@ pearbook_core/
 ```
 
 ### Core Components
-- **Node**: Manages groups with a sharded local cache (16 shards for concurrency), DHT interactions, and CRDT operations using worker pools for syncing.
-- **CRDTs**: OR-Set for members, OR-Map for expenses, PN-Counter for balances—ensure eventual consistency without conflicts.
-- **Actual Kademlia DHT using libp2p**: Real P2P network for decentralized data storage and retrieval.
-- **HTTP API**: Simple REST interface for clients.
+- **Cryptographic Security**: ECDSA key pairs generated client-side with digital signature verification for write operations
+- **User Identity Management**: Separation of operational user IDs (derived from public keys) and display names
+- **Node**: Manages groups with a sharded local cache (16 shards for concurrency), DHT interactions, and CRDT operations using worker pools for syncing
+- **CRDTs**: OR-Set for members, OR-Map for expenses, PN-Counter for balances—ensure eventual consistency without conflicts
+- **Actual Kademlia DHT using libp2p**: Real P2P network for decentralized data storage and retrieval
+- **RESTful HTTP API**: Proper GET/POST endpoints with JSON request/response formats and cryptographic security
 
 ### Syncing Mechanism
 - **Joining**: Fetches group data when a user joins.
@@ -211,9 +368,12 @@ pearbook_core/
 
 ## Research Context
 This implementation serves as a case study for:
-- **CAP Theorem**: Prioritizing Availability and Partition Tolerance over strict Consistency.
-- **CRDTs in Practice**: Demonstrating OR-Set for sets and PN-Counter for counters.
-- **DHT Scalability**: Using actual Kademlia DHT with libp2p for distributed storage.
+- **Cryptographic Security in P2P Systems**: Client-side key generation and digital signature verification
+- **User Identity Management**: Separation of operational identifiers and display names
+- **CAP Theorem**: Prioritizing Availability and Partition Tolerance over strict Consistency
+- **CRDTs in Practice**: Demonstrating OR-Set for sets and PN-Counter for counters with security
+- **DHT Scalability**: Using actual Kademlia DHT with libp2p for distributed storage
+- **Digital Signatures**: ECDSA implementation for operation authentication in decentralized systems
 
 [Reference research paper here](https://doi.org/10.64388/IREV9I2-1710338-8995)
 
@@ -231,4 +391,4 @@ For issues or questions, open a GitHub issue or contact the maintainer.
 
 ---
 
-**Note**: This is a proof-of-concept. For production, add authentication, handle larger datasets, and optimize the libp2p DHT configuration.
+**Note**: This is a proof-of-concept demonstrating cryptographic security and CRDTs in distributed systems. For production use, consider additional security measures, handle larger datasets, optimize the libp2p DHT configuration, and implement proper key management and rotation strategies.
