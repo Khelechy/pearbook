@@ -16,7 +16,17 @@ import (
 	"github.com/khelechy/pearbook/pearbook_core/models"
 	"github.com/khelechy/pearbook/pearbook_core/node"
 	"github.com/khelechy/pearbook/pearbook_core/server"
+	"github.com/khelechy/pearbook/pearbook_core/utils"
 )
+
+// ===== TEST HELPERS =====
+
+// newNodeWithCrypto creates a new node with a custom crypto service (for testing)
+func newNodeWithCrypto(kadDHT interface{}, cryptoService utils.CryptoService) *node.Node {
+	n := node.NewNodeWithKDHT(kadDHT)
+	n.SetCryptoService(cryptoService)
+	return n
+}
 
 // ===== NODE TESTS =====
 
@@ -35,7 +45,7 @@ func TestNodeCreation(t *testing.T) {
 
 func TestNodeWithKDHT(t *testing.T) {
 	kdht := dht.NewSimulatedDHT()
-	n := node.NewNodeWithKDHT(kdht)
+	n := newNodeWithCrypto(kdht, utils.NewMockCryptoService())
 	if n == nil {
 		t.Fatal("Failed to create node with KDHT")
 	}
@@ -47,7 +57,7 @@ func TestNodeWithKDHT(t *testing.T) {
 // ===== GROUP MANAGEMENT TESTS =====
 
 func TestCreateGroupValidation(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 
 	// Test invalid operation type
 	signedOp := models.SignedOperation{
@@ -72,7 +82,7 @@ func TestCreateGroupValidation(t *testing.T) {
 }
 
 func TestJoinGroupValidation(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 
 	// Test joining non-existent group
 	joinOp := models.SignedOperation{
@@ -95,7 +105,7 @@ func TestJoinGroupValidation(t *testing.T) {
 }
 
 func TestDuplicateJoinRequest(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 
 	// Create group
 	createOp := models.SignedOperation{
@@ -146,7 +156,7 @@ func TestDuplicateJoinRequest(t *testing.T) {
 // ===== EXPENSE MANAGEMENT TESTS =====
 
 func TestAddExpenseValidation(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 
 	// Create and setup group
 	setupTestGroup(t, n, "testgroup", "alice", "bob")
@@ -174,7 +184,7 @@ func TestAddExpenseValidation(t *testing.T) {
 }
 
 func TestExpenseSplitCalculation(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 	setupTestGroup(t, n, "testgroup", "alice", "bob")
 
 	// Add expense with 3 participants
@@ -222,7 +232,7 @@ func TestExpenseSplitCalculation(t *testing.T) {
 // ===== APPROVAL SYSTEM TESTS =====
 
 func TestApproveJoinValidation(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 	setupTestGroup(t, n, "testgroup", "alice", "bob")
 
 	// Try to approve non-existent request
@@ -251,7 +261,7 @@ func TestApproveJoinValidation(t *testing.T) {
 }
 
 func TestSingleApproval(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 
 	// Create group with multiple members
 	createOp := models.SignedOperation{
@@ -314,7 +324,7 @@ func TestSingleApproval(t *testing.T) {
 }
 
 func TestDuplicateApproval(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 
 	// Create group
 	createOp := models.SignedOperation{
@@ -433,7 +443,7 @@ func TestPNCounterPrecision(t *testing.T) {
 // ===== SERVER TESTS =====
 
 func TestServerCreateGroup(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 	srv := &server.Server{Node: n}
 
 	// Create test request
@@ -467,7 +477,7 @@ func TestServerCreateGroup(t *testing.T) {
 }
 
 func TestServerInvalidMethod(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 	srv := &server.Server{Node: n}
 
 	req := httptest.NewRequest("GET", "/createGroup", nil)
@@ -481,7 +491,7 @@ func TestServerInvalidMethod(t *testing.T) {
 }
 
 func TestServerInvalidJSON(t *testing.T) {
-	n := node.NewNodeWithKDHT(dht.NewSimulatedDHT())
+	n := newNodeWithCrypto(dht.NewSimulatedDHT(), utils.NewMockCryptoService())
 	srv := &server.Server{Node: n}
 
 	req := httptest.NewRequest("POST", "/createGroup", bytes.NewReader([]byte("invalid json")))

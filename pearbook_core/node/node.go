@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -27,6 +26,7 @@ type Node struct {
 	shards     []map[string]*models.Group // sharded local cache
 	shardLocks []sync.RWMutex             // per-shard locks
 	numShards  int
+	crypto     utils.CryptoService // cryptographic service
 }
 
 // NewNode creates a new node
@@ -43,6 +43,7 @@ func NewNode() *Node {
 		shards:     shards,
 		shardLocks: shardLocks,
 		numShards:  numShards,
+		crypto:     utils.NewCryptoService(),
 	}
 }
 
@@ -59,6 +60,7 @@ func NewNodeWithKDHT(kadDHT interface{}) *Node {
 		shards:     shards,
 		shardLocks: shardLocks,
 		numShards:  numShards,
+		crypto:     utils.NewCryptoService(),
 	}
 }
 
@@ -97,17 +99,10 @@ func (n *Node) CreateGroup(ctx context.Context, signedOp models.SignedOperation)
 	userName := userData["user_name"].(string)
 	publicKey := userData["public_key"].(string)
 
-	// Decode hex public key to bytes (allow mock keys for testing)
-	var publicKeyBytes []byte
-	if publicKey == "mock-key-"+signedOp.UserID {
-		// For testing purposes, use a mock binary key
-		publicKeyBytes = []byte("mock-public-key-bytes-" + signedOp.UserID)
-	} else {
-		var err error
-		publicKeyBytes, err = hex.DecodeString(publicKey)
-		if err != nil {
-			return fmt.Errorf("invalid public key format: %w", err)
-		}
+	// Decode public key using crypto service
+	publicKeyBytes, err := n.crypto.DecodePublicKey(publicKey, signedOp.UserID)
+	if err != nil {
+		return fmt.Errorf("invalid public key format: %w", err)
 	}
 
 	// Generate group master key (for now, use a simple key - in production use proper crypto)
@@ -239,17 +234,10 @@ func (n *Node) JoinGroup(ctx context.Context, signedOp models.SignedOperation) e
 	userName := userData["user_name"].(string)
 	publicKey := userData["public_key"].(string)
 
-	// Decode hex public key to bytes (allow mock keys for testing)
-	var publicKeyBytes []byte
-	if publicKey == "mock-key-"+signedOp.UserID {
-		// For testing purposes, use a mock binary key
-		publicKeyBytes = []byte("mock-public-key-bytes-" + signedOp.UserID)
-	} else {
-		var err error
-		publicKeyBytes, err = hex.DecodeString(publicKey)
-		if err != nil {
-			return fmt.Errorf("invalid public key format: %w", err)
-		}
+	// Decode public key using crypto service
+	publicKeyBytes, err := n.crypto.DecodePublicKey(publicKey, signedOp.UserID)
+	if err != nil {
+		return fmt.Errorf("invalid public key format: %w", err)
 	}
 
 	// Create join request
@@ -367,8 +355,8 @@ func (n *Node) ApproveJoin(ctx context.Context, signedOp models.SignedOperation)
 	}
 
 	// Verify signature
-	opData := utils.CreateOperationData(signedOp.Operation, signedOp.GroupID, signedOp.UserID, signedOp.Timestamp, signedOp.Data)
-	err = utils.VerifySignature(memberInfo.PublicKey, opData, signedOp.Signature)
+	opData := n.crypto.CreateOperationData(signedOp.Operation, signedOp.GroupID, signedOp.UserID, signedOp.Timestamp, signedOp.Data)
+	err = n.crypto.VerifySignature(memberInfo.PublicKey, opData, signedOp.Signature)
 	if err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
 	}
@@ -618,8 +606,8 @@ func (n *Node) AddExpense(ctx context.Context, signedOp models.SignedOperation) 
 	}
 
 	// Verify signature
-	opData := utils.CreateOperationData(signedOp.Operation, signedOp.GroupID, signedOp.UserID, signedOp.Timestamp, signedOp.Data)
-	err = utils.VerifySignature(memberInfo.PublicKey, opData, signedOp.Signature)
+	opData := n.crypto.CreateOperationData(signedOp.Operation, signedOp.GroupID, signedOp.UserID, signedOp.Timestamp, signedOp.Data)
+	err = n.crypto.VerifySignature(memberInfo.PublicKey, opData, signedOp.Signature)
 	if err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
 	}
@@ -1027,6 +1015,11 @@ func (n *Node) discoverGroupsFromRegistry(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// SetCryptoService sets the crypto service (for testing purposes)
+func (n *Node) SetCryptoService(cryptoService utils.CryptoService) {
+	n.crypto = cryptoService
 }
 
 // GetGroups returns a copy of all groups in the local cache

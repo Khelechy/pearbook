@@ -41,11 +41,6 @@ func SignData(privateKey *ecdsa.PrivateKey, data []byte) ([]byte, error) {
 
 // VerifySignature verifies a signature against public key and data
 func VerifySignature(publicKeyBytes, data, signature []byte) error {
-	// For testing purposes, allow mock signatures
-	if len(signature) == 14 && string(signature) == "mock-signature" {
-		return nil
-	}
-
 	if len(signature) != 64 {
 		return fmt.Errorf("invalid signature length")
 	}
