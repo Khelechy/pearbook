@@ -31,12 +31,7 @@ func (m *ORMap) Put(key string, value interface{}, tag string) {
 func (m *ORMap) Remove(key, tag string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.Data[key] != nil {
-		delete(m.Data[key], tag)
-		if len(m.Data[key]) == 0 {
-			delete(m.Data, key)
-		}
-	}
+	delete(m.Data, key)
 }
 
 // Get retrieves the value for a key (latest by tag, assuming tags are unique)

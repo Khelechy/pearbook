@@ -1,0 +1,11 @@
+{
+  "expense": {
+    "id": "exp1",
+    "amount": 30000,
+    "description": "Dinner",
+    "participants": [
+      "c262dff1473990bc515897a750e02a75",
+      "a8ffbc0bb6dd29bddf1a93cd5f3fbe77"
+    ]
+  }
+}
