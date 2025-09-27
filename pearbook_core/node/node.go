@@ -422,7 +422,7 @@ func (n *Node) ApproveJoin(ctx context.Context, signedOp models.SignedOperation)
 		group.Balances[joinRequest.RequesterID] = make(map[string]*crdt.PNCounter)
 
 		// Remove from pending joins
-		group.PendingJoins.Remove(requestID, uuid.New().String())
+		group.PendingJoins.Remove(requestID, "")
 	} else {
 		// Update the pending request with new approval
 		group.PendingJoins.Put(requestID, joinRequest, uuid.New().String())
@@ -470,6 +470,11 @@ func (n *Node) GetPendingJoins(ctx context.Context, signedOp models.SignedOperat
 
 	groupID := signedOp.GroupID
 
+	// Sync with latest data from DHT to ensure we have current pending joins
+	if err := n.SyncGroup(ctx, groupID); err != nil {
+		return nil, fmt.Errorf("failed to sync group: %w", err)
+	}
+
 	// Check local cache first
 	shardIndex := n.getShardIndex(groupID)
 	n.shardLocks[shardIndex].RLock()
@@ -514,22 +519,40 @@ func (n *Node) GetPendingJoins(ctx context.Context, signedOp models.SignedOperat
 		return nil, fmt.Errorf("only group members can view pending joins")
 	}
 
-	// Extract pending joins
+	// Extract pending joins - merge approvals from concurrent versions
 	pendingJoins := make(map[string]models.JoinRequest)
 	for _, requestID := range group.PendingJoins.Keys() {
-		if joinRequestInterface, exists := group.PendingJoins.Get(requestID); exists {
-			joinRequestData, err := json.Marshal(joinRequestInterface)
-			if err != nil {
-				continue // Skip invalid requests
-			}
+		// Get all versions for this requestID and merge approvals
+		mergedRequest := models.JoinRequest{}
+		first := true
 
-			var joinRequest models.JoinRequest
-			err = json.Unmarshal(joinRequestData, &joinRequest)
-			if err != nil {
-				continue // Skip invalid requests
-			}
+		if values := group.PendingJoins.GetAll(requestID); values != nil {
+			for _, v := range values {
+				// Handle both in-memory structs and JSON-unmarshaled maps
+				joinRequestData, err := json.Marshal(v)
+				if err != nil {
+					continue
+				}
+				var joinRequest models.JoinRequest
+				err = json.Unmarshal(joinRequestData, &joinRequest)
+				if err != nil {
+					continue
+				}
 
-			pendingJoins[requestID] = joinRequest
+				if first {
+					mergedRequest = joinRequest
+					first = false
+				} else {
+					// Merge approvals
+					for approver, sig := range joinRequest.Approvals {
+						mergedRequest.Approvals[approver] = sig
+					}
+				}
+			}
+		}
+
+		if !first { // We found at least one JoinRequest
+			pendingJoins[requestID] = mergedRequest
 		}
 	}
 
@@ -838,7 +861,7 @@ func (n *Node) SyncGroup(ctx context.Context, groupID string) error {
 			localGroup.GroupKey = remoteGroup.GroupKey
 			localGroup.GroupKeyUpdated = remoteGroup.GroupKeyUpdated
 		}
-		fmt.Printf("Group %s synced (updated)\n", groupID)
+		fmt.Printf("Group %s synced (merged)\n", groupID)
 	}
 	n.shardLocks[shardIndex].Unlock()
 
