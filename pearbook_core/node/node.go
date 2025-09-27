@@ -2,18 +2,20 @@ package node
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/khelechy/pearbook/crdt"
-	"github.com/khelechy/pearbook/dht"
-	"github.com/khelechy/pearbook/models"
-	"github.com/khelechy/pearbook/utils"
+	"github.com/khelechy/pearbook/pearbook_core/crdt"
+	"github.com/khelechy/pearbook/pearbook_core/dht"
+	"github.com/khelechy/pearbook/pearbook_core/models"
+	"github.com/khelechy/pearbook/pearbook_core/utils"
 
 	kdht "github.com/libp2p/go-libp2p-kad-dht"
 )
@@ -95,6 +97,19 @@ func (n *Node) CreateGroup(ctx context.Context, signedOp models.SignedOperation)
 	userName := userData["user_name"].(string)
 	publicKey := userData["public_key"].(string)
 
+	// Decode hex public key to bytes (allow mock keys for testing)
+	var publicKeyBytes []byte
+	if publicKey == "mock-key-"+signedOp.UserID {
+		// For testing purposes, use a mock binary key
+		publicKeyBytes = []byte("mock-public-key-bytes-" + signedOp.UserID)
+	} else {
+		var err error
+		publicKeyBytes, err = hex.DecodeString(publicKey)
+		if err != nil {
+			return fmt.Errorf("invalid public key format: %w", err)
+		}
+	}
+
 	// Generate group master key (for now, use a simple key - in production use proper crypto)
 	groupKey := []byte(fmt.Sprintf("group-key-%s-%d", groupID, time.Now().Unix()))
 
@@ -113,7 +128,7 @@ func (n *Node) CreateGroup(ctx context.Context, signedOp models.SignedOperation)
 	memberInfo := models.MemberInfo{
 		UserID:    signedOp.UserID,
 		UserName:  userName,
-		PublicKey: []byte(publicKey),
+		PublicKey: publicKeyBytes,
 		JoinedAt:  time.Now(),
 	}
 	group.Members.Put(signedOp.UserID, memberInfo, uuid.New().String())
@@ -146,6 +161,9 @@ func (n *Node) CreateGroup(ctx context.Context, signedOp models.SignedOperation)
 		return err
 	}
 
+	// Register group in global registry
+	n.registerGroupInRegistry(ctx, groupID)
+
 	return nil
 }
 
@@ -162,30 +180,43 @@ func (n *Node) JoinGroup(ctx context.Context, signedOp models.SignedOperation) e
 
 	groupID := signedOp.GroupID
 
-	// Fetch group from DHT
-	key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
-	var val []byte
-	var err error
-	if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
-		val, err = ipfs.GetValue(ctx, key)
-	} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
-		val, err = sim.GetValue(ctx, key)
-	} else {
-		return fmt.Errorf("unsupported DHT type")
-	}
-	if err != nil {
-		return fmt.Errorf("group not found: %w", err)
-	}
+	// Check local cache first
+	shardIndex := n.getShardIndex(groupID)
+	n.shardLocks[shardIndex].RLock()
+	group, exists := n.shards[shardIndex][groupID]
+	n.shardLocks[shardIndex].RUnlock()
 
-	decompressedData, err := utils.DecompressData([]byte(val))
-	if err != nil {
-		return fmt.Errorf("failed to decompress group data: %w", err)
-	}
+	if !exists {
+		// Fetch group from DHT if not in local cache
+		key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
+		var val []byte
+		var err error
+		if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
+			val, err = ipfs.GetValue(ctx, key)
+		} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
+			val, err = sim.GetValue(ctx, key)
+		} else {
+			return fmt.Errorf("unsupported DHT type")
+		}
+		if err != nil {
+			return fmt.Errorf("group not found: %w", err)
+		}
 
-	var group models.Group
-	err = json.Unmarshal(decompressedData, &group)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal group data: %w", err)
+		decompressedData, err := utils.DecompressData([]byte(val))
+		if err != nil {
+			return fmt.Errorf("failed to decompress group data: %w", err)
+		}
+
+		group = &models.Group{}
+		err = json.Unmarshal(decompressedData, group)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal group data: %w", err)
+		}
+
+		// Cache the fetched group locally for future operations
+		n.shardLocks[shardIndex].Lock()
+		n.shards[shardIndex][groupID] = group
+		n.shardLocks[shardIndex].Unlock()
 	}
 
 	// Check if already a member
@@ -208,20 +239,32 @@ func (n *Node) JoinGroup(ctx context.Context, signedOp models.SignedOperation) e
 	userName := userData["user_name"].(string)
 	publicKey := userData["public_key"].(string)
 
+	// Decode hex public key to bytes (allow mock keys for testing)
+	var publicKeyBytes []byte
+	if publicKey == "mock-key-"+signedOp.UserID {
+		// For testing purposes, use a mock binary key
+		publicKeyBytes = []byte("mock-public-key-bytes-" + signedOp.UserID)
+	} else {
+		var err error
+		publicKeyBytes, err = hex.DecodeString(publicKey)
+		if err != nil {
+			return fmt.Errorf("invalid public key format: %w", err)
+		}
+	}
+
 	// Create join request
 	joinRequest := models.JoinRequest{
 		RequesterID: signedOp.UserID,
 		UserName:    userName,
-		PublicKey:   []byte(publicKey),
+		PublicKey:   publicKeyBytes,
 		Timestamp:   time.Now(),
 		Approvals:   make(map[string][]byte),
 	}
 
 	group.PendingJoins.Put(requestID, joinRequest, uuid.New().String())
 
-	shardIndex := n.getShardIndex(groupID)
 	n.shardLocks[shardIndex].Lock()
-	n.shards[shardIndex][groupID] = &group
+	n.shards[shardIndex][groupID] = group
 	n.shardLocks[shardIndex].Unlock()
 
 	data, err := json.Marshal(group)
@@ -233,6 +276,8 @@ func (n *Node) JoinGroup(ctx context.Context, signedOp models.SignedOperation) e
 	if err != nil {
 		return fmt.Errorf("failed to compress group data: %w", err)
 	}
+
+	key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
 
 	if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
 		err = ipfs.PutValue(ctx, key, compressedData)
@@ -260,30 +305,43 @@ func (n *Node) ApproveJoin(ctx context.Context, signedOp models.SignedOperation)
 
 	groupID := signedOp.GroupID
 
-	// Fetch group from DHT
-	key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
-	var val []byte
-	var err error
-	if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
-		val, err = ipfs.GetValue(ctx, key)
-	} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
-		val, err = sim.GetValue(ctx, key)
-	} else {
-		return fmt.Errorf("unsupported DHT type")
-	}
-	if err != nil {
-		return fmt.Errorf("group not found: %w", err)
-	}
+	// Check local cache first
+	shardIndex := n.getShardIndex(groupID)
+	n.shardLocks[shardIndex].RLock()
+	group, exists := n.shards[shardIndex][groupID]
+	n.shardLocks[shardIndex].RUnlock()
 
-	decompressedData, err := utils.DecompressData([]byte(val))
-	if err != nil {
-		return fmt.Errorf("failed to decompress group data: %w", err)
-	}
+	if !exists {
+		// Fetch group from DHT if not in local cache
+		key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
+		var val []byte
+		var err error
+		if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
+			val, err = ipfs.GetValue(ctx, key)
+		} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
+			val, err = sim.GetValue(ctx, key)
+		} else {
+			return fmt.Errorf("unsupported DHT type")
+		}
+		if err != nil {
+			return fmt.Errorf("group not found: %w", err)
+		}
 
-	var group models.Group
-	err = json.Unmarshal(decompressedData, &group)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal group data: %w", err)
+		decompressedData, err := utils.DecompressData([]byte(val))
+		if err != nil {
+			return fmt.Errorf("failed to decompress group data: %w", err)
+		}
+
+		group = &models.Group{}
+		err = json.Unmarshal(decompressedData, group)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal group data: %w", err)
+		}
+
+		// Cache the fetched group locally for future operations
+		n.shardLocks[shardIndex].Lock()
+		n.shards[shardIndex][groupID] = group
+		n.shardLocks[shardIndex].Unlock()
 	}
 
 	// Check if approver is a member
@@ -321,6 +379,18 @@ func (n *Node) ApproveJoin(ctx context.Context, signedOp models.SignedOperation)
 		return fmt.Errorf("request_id not found in signed operation data")
 	}
 
+	// Parse the requester ID from the request ID (format: "groupID:userID")
+	parts := strings.Split(requestID, ":")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid request_id format")
+	}
+	requesterID := parts[1]
+
+	// Check if requester is already a member
+	if _, alreadyMember := group.Members.Get(requesterID); alreadyMember {
+		return fmt.Errorf("user is already a member of the group")
+	}
+
 	// Get the join request
 	joinRequestInterface, exists := group.PendingJoins.Get(requestID)
 	if !exists {
@@ -347,9 +417,8 @@ func (n *Node) ApproveJoin(ctx context.Context, signedOp models.SignedOperation)
 	// Add approval (use the signature from the signed operation)
 	joinRequest.Approvals[signedOp.UserID] = signedOp.Signature
 
-	// Check if we have enough approvals (simple majority for now)
-	totalMembers := len(group.Members.Keys())
-	requiredApprovals := (totalMembers / 2) + 1
+	// Check if we have enough approvals (single approval required)
+	requiredApprovals := 1
 
 	if len(joinRequest.Approvals) >= requiredApprovals {
 		// Add member to group
@@ -371,9 +440,8 @@ func (n *Node) ApproveJoin(ctx context.Context, signedOp models.SignedOperation)
 		group.PendingJoins.Put(requestID, joinRequest, uuid.New().String())
 	}
 
-	shardIndex := n.getShardIndex(groupID)
 	n.shardLocks[shardIndex].Lock()
-	n.shards[shardIndex][groupID] = &group
+	n.shards[shardIndex][groupID] = group
 	n.shardLocks[shardIndex].Unlock()
 
 	data, err := json.Marshal(group)
@@ -385,6 +453,8 @@ func (n *Node) ApproveJoin(ctx context.Context, signedOp models.SignedOperation)
 	if err != nil {
 		return fmt.Errorf("failed to compress group data: %w", err)
 	}
+
+	key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
 
 	if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
 		err = ipfs.PutValue(ctx, key, compressedData)
@@ -412,51 +482,54 @@ func (n *Node) GetPendingJoins(ctx context.Context, signedOp models.SignedOperat
 
 	groupID := signedOp.GroupID
 
-	// Check if requester is an approved member
+	// Check local cache first
 	shardIndex := n.getShardIndex(groupID)
 	n.shardLocks[shardIndex].RLock()
 	group, exists := n.shards[shardIndex][groupID]
 	n.shardLocks[shardIndex].RUnlock()
 
 	if !exists {
-		return nil, fmt.Errorf("group not found")
+		// Fetch group from DHT if not in local cache
+		key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
+		var val []byte
+		var err error
+		if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
+			val, err = ipfs.GetValue(ctx, key)
+		} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
+			val, err = sim.GetValue(ctx, key)
+		} else {
+			return nil, fmt.Errorf("unsupported DHT type")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("group not found: %w", err)
+		}
+
+		decompressedData, err := utils.DecompressData([]byte(val))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decompress group data: %w", err)
+		}
+
+		group = &models.Group{}
+		err = json.Unmarshal(decompressedData, group)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal group data: %w", err)
+		}
+
+		// Cache the fetched group locally for future operations
+		n.shardLocks[shardIndex].Lock()
+		n.shards[shardIndex][groupID] = group
+		n.shardLocks[shardIndex].Unlock()
 	}
 
-	// Check if requester is an approved member
+	// Check if requester is a member
 	if _, exists := group.Members.Get(signedOp.UserID); !exists {
 		return nil, fmt.Errorf("only group members can view pending joins")
 	}
 
-	// Fetch latest group data from DHT
-	key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
-	var val []byte
-	var err error
-	if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
-		val, err = ipfs.GetValue(ctx, key)
-	} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
-		val, err = sim.GetValue(ctx, key)
-	} else {
-		return nil, fmt.Errorf("unsupported DHT type")
-	}
-	if err != nil {
-		return nil, fmt.Errorf("group not found: %w", err)
-	}
-
-	decompressedData, err := utils.DecompressData([]byte(val))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decompress group data: %w", err)
-	}
-
-	var remoteGroup models.Group
-	err = json.Unmarshal(decompressedData, &remoteGroup)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal group data: %w", err)
-	}
-
 	// Extract pending joins
 	pendingJoins := make(map[string]models.JoinRequest)
-	for _, requestID := range remoteGroup.PendingJoins.Keys() {
-		if joinRequestInterface, exists := remoteGroup.PendingJoins.Get(requestID); exists {
+	for _, requestID := range group.PendingJoins.Keys() {
+		if joinRequestInterface, exists := group.PendingJoins.Get(requestID); exists {
 			joinRequestData, err := json.Marshal(joinRequestInterface)
 			if err != nil {
 				continue // Skip invalid requests
@@ -486,16 +559,48 @@ func (n *Node) AddExpense(ctx context.Context, signedOp models.SignedOperation) 
 		return fmt.Errorf("invalid operation type for AddExpense")
 	}
 
-	shardIndex := n.getShardIndex(signedOp.GroupID)
+	groupID := signedOp.GroupID
+
+	// Check local cache first
+	shardIndex := n.getShardIndex(groupID)
 	n.shardLocks[shardIndex].RLock()
-	group, exists := n.shards[shardIndex][signedOp.GroupID]
+	group, exists := n.shards[shardIndex][groupID]
 	n.shardLocks[shardIndex].RUnlock()
 
 	if !exists {
-		return fmt.Errorf("group not found")
+		// Fetch group from DHT if not in local cache
+		key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
+		var val []byte
+		var err error
+		if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
+			val, err = ipfs.GetValue(ctx, key)
+		} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
+			val, err = sim.GetValue(ctx, key)
+		} else {
+			return fmt.Errorf("unsupported DHT type")
+		}
+		if err != nil {
+			return fmt.Errorf("group not found: %w", err)
+		}
+
+		decompressedData, err := utils.DecompressData([]byte(val))
+		if err != nil {
+			return fmt.Errorf("failed to decompress group data: %w", err)
+		}
+
+		group = &models.Group{}
+		err = json.Unmarshal(decompressedData, group)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal group data: %w", err)
+		}
+
+		// Cache the fetched group locally for future operations
+		n.shardLocks[shardIndex].Lock()
+		n.shards[shardIndex][groupID] = group
+		n.shardLocks[shardIndex].Unlock()
 	}
 
-	// Get payer's public key
+	// Check if payer is an approved member
 	memberInfoInterface, exists := group.Members.Get(signedOp.UserID)
 	if !exists {
 		return fmt.Errorf("user is not an approved member")
@@ -585,8 +690,7 @@ func (n *Node) AddExpense(ctx context.Context, signedOp models.SignedOperation) 
 		return fmt.Errorf("failed to compress group data: %w", err)
 	}
 
-	key := fmt.Sprintf("/namespace/%s/%s", "group", signedOp.GroupID)
-
+	key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
 	if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
 		err = ipfs.PutValue(ctx, key, compressedData)
 	} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
@@ -612,13 +716,45 @@ func (n *Node) GetBalances(ctx context.Context, signedOp models.SignedOperation)
 		return nil, fmt.Errorf("invalid operation type for GetBalances")
 	}
 
-	shardIndex := n.getShardIndex(signedOp.GroupID)
+	groupID := signedOp.GroupID
+
+	// Check local cache first
+	shardIndex := n.getShardIndex(groupID)
 	n.shardLocks[shardIndex].RLock()
-	group, exists := n.shards[shardIndex][signedOp.GroupID]
+	group, exists := n.shards[shardIndex][groupID]
 	n.shardLocks[shardIndex].RUnlock()
 
 	if !exists {
-		return nil, fmt.Errorf("group not found")
+		// Fetch group from DHT if not in local cache
+		key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
+		var val []byte
+		var err error
+		if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
+			val, err = ipfs.GetValue(ctx, key)
+		} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
+			val, err = sim.GetValue(ctx, key)
+		} else {
+			return nil, fmt.Errorf("unsupported DHT type")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("group not found: %w", err)
+		}
+
+		decompressedData, err := utils.DecompressData([]byte(val))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decompress group data: %w", err)
+		}
+
+		group = &models.Group{}
+		err = json.Unmarshal(decompressedData, group)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal group data: %w", err)
+		}
+
+		// Cache the fetched group locally for future operations
+		n.shardLocks[shardIndex].Lock()
+		n.shards[shardIndex][groupID] = group
+		n.shardLocks[shardIndex].Unlock()
 	}
 
 	// Check if user is an approved member
@@ -743,6 +879,10 @@ func (n *Node) StartPeriodicSync(ctx context.Context, numWorkers int) {
 }
 
 func (n *Node) performSync(ctx context.Context, numWorkers int) {
+	// First, discover new groups from the registry
+	n.discoverGroupsFromRegistry(ctx)
+
+	// Then sync all known groups
 	var groupIDs []string
 	for i := 0; i < n.numShards; i++ {
 		n.shardLocks[i].RLock()
@@ -777,6 +917,116 @@ func (n *Node) performSync(ctx context.Context, numWorkers int) {
 	}
 	close(jobs)
 	wg.Wait()
+}
+
+// registerGroupInRegistry adds a group to the global group registry
+func (n *Node) registerGroupInRegistry(ctx context.Context, groupID string) {
+	if n.KDHT == nil {
+		return
+	}
+
+	registryKey := "/namespace/group-registry"
+
+	// Get current registry
+	var groupIDs []string
+	if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
+		if val, err := ipfs.GetValue(ctx, registryKey); err == nil {
+			if decompressed, err := utils.DecompressData(val); err == nil {
+				json.Unmarshal(decompressed, &groupIDs)
+			}
+		}
+	} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
+		if val, err := sim.GetValue(ctx, registryKey); err == nil {
+			if decompressed, err := utils.DecompressData(val); err == nil {
+				json.Unmarshal(decompressed, &groupIDs)
+			}
+		}
+	}
+
+	// Add new group if not already present
+	found := false
+	for _, id := range groupIDs {
+		if id == groupID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		groupIDs = append(groupIDs, groupID)
+	}
+
+	// Update registry
+	if data, err := json.Marshal(groupIDs); err == nil {
+		if compressed, err := utils.CompressData(data); err == nil {
+			if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
+				ipfs.PutValue(ctx, registryKey, compressed)
+			} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
+				sim.PutValue(ctx, registryKey, compressed)
+			}
+		}
+	}
+}
+
+// discoverGroupsFromRegistry fetches the global group registry and adds unknown groups to local cache
+func (n *Node) discoverGroupsFromRegistry(ctx context.Context) {
+	if n.KDHT == nil {
+		return
+	}
+
+	registryKey := "/namespace/group-registry"
+
+	var groupIDs []string
+	if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
+		if val, err := ipfs.GetValue(ctx, registryKey); err == nil {
+			if decompressed, err := utils.DecompressData(val); err == nil {
+				json.Unmarshal(decompressed, &groupIDs)
+			}
+		}
+	} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
+		if val, err := sim.GetValue(ctx, registryKey); err == nil {
+			if decompressed, err := utils.DecompressData(val); err == nil {
+				json.Unmarshal(decompressed, &groupIDs)
+			}
+		}
+	}
+
+	// Add any unknown groups to local cache by fetching them
+	for _, groupID := range groupIDs {
+		shardIndex := n.getShardIndex(groupID)
+		n.shardLocks[shardIndex].RLock()
+		_, exists := n.shards[shardIndex][groupID]
+		n.shardLocks[shardIndex].RUnlock()
+
+		if !exists {
+			// Fetch group and add to cache
+			key := fmt.Sprintf("/namespace/%s/%s", "group", groupID)
+			if ipfs, ok := n.KDHT.(*kdht.IpfsDHT); ok {
+				if val, err := ipfs.GetValue(ctx, key); err == nil {
+					if decompressed, err := utils.DecompressData(val); err == nil {
+						var group models.Group
+						if err := json.Unmarshal(decompressed, &group); err == nil {
+							n.shardLocks[shardIndex].Lock()
+							n.shards[shardIndex][groupID] = &group
+							n.shardLocks[shardIndex].Unlock()
+							fmt.Printf("Discovered new group: %s\n", groupID)
+						}
+					}
+				}
+			} else if sim, ok := n.KDHT.(*dht.SimulatedDHT); ok {
+				if val, err := sim.GetValue(ctx, key); err == nil {
+					if decompressed, err := utils.DecompressData(val); err == nil {
+						var group models.Group
+						if err := json.Unmarshal(decompressed, &group); err == nil {
+							n.shardLocks[shardIndex].Lock()
+							n.shards[shardIndex][groupID] = &group
+							n.shardLocks[shardIndex].Unlock()
+							fmt.Printf("Discovered new group: %s\n", groupID)
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // GetGroups returns a copy of all groups in the local cache

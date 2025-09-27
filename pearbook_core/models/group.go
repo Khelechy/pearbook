@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	"github.com/khelechy/pearbook/crdt"
+	"github.com/khelechy/pearbook/pearbook_core/crdt"
 )
 
 // Group represents a group of users

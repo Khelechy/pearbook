@@ -20,9 +20,12 @@ PearBook allows users to create groups, join them, add expenses, and track balan
 ## Features
 - **Cryptographic Security**: Client-side ECDSA key generation with digital signature verification for all write operations
 - **User Identity Management**: Separation of operational user IDs (derived from public keys) and display names
-- **Decentralized Groups**: Create and join groups with approval-based membership
+- **Decentralized Groups**: Create and join groups with single approval-based membership
+- **Single Approval System**: Simplified joining process requiring only one approval instead of majority consensus
 - **Expense Management**: Add expenses with equal splits, track participants and payers (using OR-Map CRDT for conflict-free storage)
 - **Balance Tracking**: CRDT-based balances for owed amounts with enriched responses including user names
+- **Global Group Registry**: Decentralized discovery system for finding groups across distributed nodes
+- **Cache-First Performance**: All operations prioritize local cache for optimal performance and reduced network calls
 - **Offline Support**: Local replicas with eventual sync via DHT (periodic syncing every 5 seconds and on-demand for reads)
 - **RESTful HTTP API**: GET/POST endpoints with JSON request/response formats
 - **Testing**: Unit tests for core functionality including cryptographic operations
@@ -49,32 +52,71 @@ PearBook allows users to create groups, join them, add expenses, and track balan
    ```
    This will download all required dependencies.
 
-3. **Build the Application**:
+3. **Build the Application** (Optional):
    ```bash
-   go build
+   go build ./cmd/pearbook
    ```
-   This creates an executable `pearbook_core.exe` (on Windows) or `pearbook_core` (on Linux/Mac).
+   This creates an executable in the `cmd/pearbook` directory.
 
 ## Running the Application
 
-   ```bash
-   go run main.go
-   ```
-   Or, after building:
-   ```bash
-   ./pearbook_core
-   ```
+### Option 1: Run without building (Recommended for development)
+```bash
+go run cmd/pearbook/main.go server
+```
 
-   The server starts on `http://localhost:8080` and performs a demo setup (creates a group, adds a user, and an expense).
+### Option 2: Build and run
+```bash
+go build ./cmd/pearbook
+./pearbook server
+```
 
-2. **Server Output**:
-   - Console will show: "Starting server on :8080"
-   - Demo balances: "Bob's balances: map[alice:50]"
+The server starts on `http://localhost:8081` and connects to the libp2p DHT network for decentralized data storage.
 
-3. **Stop the Server**:
-   Press `Ctrl+C` in the terminal.
+## CLI Commands
 
-  The server now supports graceful shutdown: when you press `Ctrl+C` (SIGINT) or send a SIGTERM signal, it will finish handling any in-progress requests before exiting cleanly.
+The application includes a comprehensive CLI tool for key management and operation signing:
+
+### Generate Keys
+```bash
+# Generate a new ECDSA key pair
+go run cmd/pearbook/main.go genkey --output my_key.pem
+
+# Output includes:
+# - Private key saved to file
+# - Public key in hex format (ready for API use)
+# - User ID derived from public key
+```
+
+### Sign Operations
+```bash
+# Sign using a JSON file (recommended)
+echo '{"user":{"user_name":"Alice","public_key":"0462c2d3..."}}' > data.json
+go run cmd/pearbook/main.go sign \
+  --operation join_group \
+  --group-id "group123" \
+  --user-id "a1b2c3d4..." \
+  --data-file data.json \
+  --key my_key.pem
+
+# Or sign with inline JSON
+go run cmd/pearbook/main.go sign \
+  --operation create_group \
+  --user-id "a1b2c3d4..." \
+  --data '{"group":{"id":"group123","name":"Trip"},"user":{"user_name":"Alice","public_key":"0462c2d3..."}}' \
+  --key my_key.pem
+```
+
+### View Help
+```bash
+# Main help
+go run cmd/pearbook/main.go --help
+
+# Command-specific help
+go run cmd/pearbook/main.go genkey --help
+go run cmd/pearbook/main.go sign --help
+go run cmd/pearbook/main.go server --help
+```
 
 ## API Usage
 
@@ -85,22 +127,30 @@ The application exposes a RESTful HTTP API for client interactions. All requests
 **Client-Side Key Generation:**
 Before using the API, clients must generate ECDSA key pairs:
 
-```go
-// Example Go code for key generation
-privateKey, publicKey, err := utils.GenerateKeyPair()
-userID := utils.GenerateUserID(publicKey)
+```bash
+# Generate keys using the CLI
+go run cmd/pearbook/main.go genkey --output private_key.pem
+# This outputs your public key in hex format and your user ID
 ```
 
 **Digital Signatures:**
-For write operations, clients must sign operation data:
+For write operations, clients must sign operation data using the CLI:
 
-```go
-// Create operation data
-opData := utils.CreateOperationData(operation, groupID, userID, timestamp, data)
+```bash
+# Create operation data file
+echo '{"user":{"user_name":"Alice","public_key":"0462c2d3..."}}' > op_data.json
 
-// Sign with private key
-signature, err := utils.SignData(privateKey, opData)
+# Sign the operation
+go run cmd/pearbook/main.go sign \
+  --operation join_group \
+  --group-id "group123" \
+  --user-id "a1b2c3d4..." \
+  --data-file op_data.json \
+  --key private_key.pem \
+  --output signed_operation.json
 ```
+
+The signed operation JSON can then be sent to the API endpoints.
 
 ### Endpoints
 
@@ -156,7 +206,7 @@ signature, err := utils.SignData(privateKey, opData)
 
 #### 3. Approve Join Request
 - **Endpoint**: `POST /approveJoin`
-- **Description**: Approves a pending join request (requires majority approval from existing members)
+- **Description**: Approves a pending join request (requires single approval from any existing member)
 - **Request Body**:
   ```json
   {
@@ -299,24 +349,21 @@ func main() {
 Use the generated keys and signatures in API requests:
 
 ```bash
+# Start the server in another terminal
+go run cmd/pearbook/main.go server
+
 # Create group with cryptographic signature
-curl -X POST http://localhost:8080/createGroup \
+curl -X POST http://localhost:8081/createGroup \
   -H "Content-Type: application/json" \
-  -d '{
-    "operation": "create_group",
-    "group_id": "group123",
-    "user_id": "'$ALICE_USER_ID'",
-    "user_name": "Alice Johnson",
-    "timestamp": 1638360000,
-    "data": {
-      "group": {"id": "group123", "name": "Test Group"},
-      "user": {"user_name": "Alice Johnson", "public_key": "'$ALICE_PUBLIC_KEY'"}
-    },
-    "signature": "'$SIGNATURE'"
-  }'
+  -d @signed_create_group.json
+
+# Join group
+curl -X POST http://localhost:8081/joinGroup \
+  -H "Content-Type: application/json" \
+  -d @signed_join_group.json
 
 # Get balances (no signature required)
-curl "http://localhost:8080/getBalances?group_id=group123&user_id=$ALICE_USER_ID"
+curl "http://localhost:8081/getBalances?group_id=group123&user_id=a1b2c3d4e5f67890"
 ```
 
 ### Integration Testing
@@ -347,11 +394,13 @@ pearbook_core/
 - **RESTful HTTP API**: Proper GET/POST endpoints with JSON request/response formats and cryptographic security
 
 ### Syncing Mechanism
-- **Joining**: Fetches group data when a user joins.
-- **Periodic**: Syncs all groups every 5 seconds in the background using concurrent worker pools for efficiency.
-- **On-Demand**: Syncs before balance queries for up-to-date data.
-- **Merging**: Uses CRDT Merge functions to resolve conflicts and achieve eventual consistency.
-- **Unique Tags**: Generates UUIDs for each CRDT operation to ensure proper conflict resolution.
+- **Cache-First**: All operations prioritize local cache for performance, falling back to DHT when needed
+- **Joining**: Fetches group data when a user joins with automatic local caching
+- **Periodic**: Syncs all groups every 5 seconds in the background using concurrent worker pools for efficiency
+- **Global Discovery**: Decentralized group registry enables cross-node group discovery and synchronization
+- **On-Demand**: Syncs before balance queries for up-to-date data with cache updates
+- **Merging**: Uses CRDT Merge functions to resolve conflicts and achieve eventual consistency
+- **Unique Tags**: Generates UUIDs for each CRDT operation to ensure proper conflict resolution
 
 ### Design Principles
 - **Decentralized**: No central server; data replicated via DHT.
@@ -361,15 +410,20 @@ pearbook_core/
 
 ## Performance Optimizations
 
-- **Sharding**: Local cache divided into 16 shards using hash-based indexing to reduce lock contention and improve concurrency.
-- **Worker Pools**: Concurrent workers for periodic syncing, allowing multiple groups to sync simultaneously without blocking.
-- **Lazy Balance Computation**: Balances calculated on-demand to minimize unnecessary computations.
-- **Cache Invalidation**: Efficient invalidation on updates to ensure data freshness.
+- **Cache-First Architecture**: All operations check local cache before network calls, significantly reducing latency
+- **Sharding**: Local cache divided into 16 shards using hash-based indexing to reduce lock contention and improve concurrency
+- **Worker Pools**: Concurrent workers for periodic syncing, allowing multiple groups to sync simultaneously without blocking
+- **Lazy Balance Computation**: Balances calculated on-demand to minimize unnecessary computations
+- **Global Group Registry**: Efficient discovery mechanism for finding groups across distributed nodes
+- **Cache Invalidation**: Efficient invalidation on updates to ensure data freshness
 
 ## Research Context
 This implementation serves as a case study for:
 - **Cryptographic Security in P2P Systems**: Client-side key generation and digital signature verification
 - **User Identity Management**: Separation of operational identifiers and display names
+- **Single Approval Systems**: Simplified consensus mechanisms in decentralized groups
+- **Cache-First Performance**: Optimizing distributed systems with local-first architectures
+- **Global Discovery**: Decentralized registry systems for peer-to-peer networks
 - **CAP Theorem**: Prioritizing Availability and Partition Tolerance over strict Consistency
 - **CRDTs in Practice**: Demonstrating OR-Set for sets and PN-Counter for counters with security
 - **DHT Scalability**: Using actual Kademlia DHT with libp2p for distributed storage
